@@ -2,15 +2,54 @@
 % Please edit documentation in R/kernelshap.R
 \name{kernelshap}
 \alias{kernelshap}
+\alias{kernelshap.default}
+\alias{kernelshap.ranger}
+\alias{kernelshap.Learner}
 \title{Kernel SHAP}
 \usage{
-kernelshap(
+kernelshap(object, ...)
+
+\method{kernelshap}{default}(
+  object,
   X,
-  pred_fun,
   bg_X,
+  pred_fun = stats::predict,
   bg_w = NULL,
   paired_sampling = TRUE,
   m = "auto",
+  exact = TRUE,
+  tol = 0.01,
+  max_iter = 250,
+  parallel = FALSE,
+  parallel_args = NULL,
+  verbose = TRUE,
+  ...
+)
+
+\method{kernelshap}{ranger}(
+  object,
+  X,
+  bg_X,
+  pred_fun = function(m, X, ...) stats::predict(m, X, ...)$predictions,
+  bg_w = NULL,
+  paired_sampling = TRUE,
+  m = "auto",
+  exact = TRUE,
+  tol = 0.01,
+  max_iter = 250,
+  verbose = TRUE,
+  ...
+)
+
+\method{kernelshap}{Learner}(
+  object,
+  X,
+  bg_X,
+  pred_fun = function(m, X) m$predict_newdata(X)$response,
+  bg_w = NULL,
+  paired_sampling = TRUE,
+  m = "auto",
+  exact = TRUE,
   tol = 0.01,
   max_iter = 250,
   verbose = TRUE,
@@ -18,78 +57,139 @@ kernelshap(
 )
 }
 \arguments{
-\item{X}{Matrix or data.frame containing the observations to be explained.
-Should only contain model features.}
+\item{object}{Fitted model object.}
 
-\item{pred_fun}{A function taking objects like \code{X} or \code{bg_X} as input and providing numeric
-predictions. Example: If "fit" denotes a logistic regression fitted via \code{stats::glm},
-and SHAP values should be on the probability scale, then this argument is
-\code{function(X) predict(fit, X, type = "response")}.}
+\item{...}{Additional arguments passed to \code{pred_fun(object, X, ...)}.}
 
-\item{bg_X}{Matrix or data.frame used as background data to calculate marginal
-expectations. Its column structure must be similar to \code{X}.
-This data should neither be too small nor too large (50-200 rows). A large background
-data slows down the calculations, while a small data set leads to imprecise SHAP values.}
+\item{X}{A (n x p) matrix, data.frame, tibble or data.table of rows to be explained.
+Important: The columns should only represent model features, not the response.}
+
+\item{bg_X}{Background data used to integrate out "switched off" features,
+often a subset of the training data (around 100 to 200 rows)
+It should contain the same columns as \code{X}. Columns not in \code{X} are silently
+dropped and the columns are arranged into the order as they appear in \code{X}.}
+
+\item{pred_fun}{Prediction function of the form \code{function(object, X, ...)},
+providing K >= 1 numeric predictions per row. Its first argument represents the
+model \code{object}, its second argument a data structure like \code{X}.
+(The names of the first two arguments do not matter.) Additional (named)
+arguments are passed via \code{...}. The default, \code{stats::predict}, will
+work in most cases. Some exceptions (classes "ranger" and mlr3 "Learner")
+are handled separately. In other cases, the function must be specified manually.}
 
 \item{bg_w}{Optional vector of case weights for each row of \code{bg_X}.}
 
 \item{paired_sampling}{Logical flag indicating whether to use paired sampling.
 The default is \code{TRUE}. This means that with every feature subset S,
-also its complement is evaluated, which leads to faster convergence.}
+also its complement is evaluated, which leads to considerably faster convergence.}
 
 \item{m}{Number of feature subsets S to be evaluated during one iteration.
-The default, "auto", equals \code{trunc(20 * sqrt(ncol(X)))}.
+The default, "auto", equals \code{max(trunc(20*sqrt(p)), 5*p)}, where p is the
+number of features.
 For the paired sampling strategy, 2m evaluations are done per iteration.}
 
+\item{exact}{If \code{TRUE} (default) and the number of features p is at most 5,
+the algorithm will produce exact Kernel SHAP values. In this case, the arguments
+\code{m}, \code{paired_sampling}, \code{tol}, and \code{max_iter} are ignored.}
+
 \item{tol}{Tolerance determining when to stop. The algorithm keeps iterating until
-max(sigma_n) / diff(range(beta_n)) < tol, where sigma_n are the standard errors
-and beta_n are the SHAP values of a given observation.}
+max(sigma_n) / diff(range(beta_n)) < tol, where the beta_n are the SHAP values
+of a given observation and sigma_n their standard errors. For multidimensional
+predictions, the criterion must be satisfied for each dimension separately.
+The stopping criterion uses the fact that standard errors and SHAP values are all
+on the same scale.}
 
 \item{max_iter}{If the stopping criterion (see \code{tol}) is not reached after
-\code{max_iter} iterations, then the algorithm stops.}
+\code{max_iter} iterations, the algorithm stops.}
+
+\item{parallel}{If \code{TRUE}, use parallel \code{foreach::foreach()} to loop over rows
+to be explained. Must register backend beforehand, e.g. via "doFuture" package,
+see Readme for an example. Parallelization automatically disables the progress bar.}
+
+\item{parallel_args}{A named list of arguments passed to \code{foreach::foreach()}, see
+\code{?foreach::foreach}. Ideally, this is \code{NULL} (default). Only relevant
+if \code{parallel = TRUE}. Example on Windows: if \code{object} is a generalized
+additive model fitted with package "mgcv", then one might need to set
+\code{parallel_args = list(.packages = "mgcv")}.}
 
 \item{verbose}{Set to \code{FALSE} to suppress messages, warnings, and the progress bar.}
-
-\item{...}{Currently unused.}
 }
 \value{
 An object of class "kernelshap" with the following components:
 \itemize{
-\item \code{S}: Matrix with SHAP values.
-\item \code{X}: Same as parameter \code{X}.
-\item \code{baseline}: The average prediction on the background data.
-\item \code{SE}: Standard errors corresponding to \code{S}.
-\item \code{n_iter}: Number of iterations until convergence per row.
-\item \code{converged}: Logical vector indicating convergence per row.
+\item \code{S}: (n x p) matrix with SHAP values or, if the model output has dimension K > 1,
+a list of K such matrices.
+\item \code{X}: Same as input argument \code{X}.
+\item \code{baseline}: A vector of length K representing the average prediction on the background data.
+\item \code{SE}: Standard errors corresponding to \code{S} (and organized like \code{S}).
+\item \code{n_iter}: Integer vector of length n providing the number of iterations per row of \code{X}.
+\item \code{converged}: Logical vector of length n indicating convergence per row of \code{X}.
 }
 }
 \description{
-This function implements the model-agnostic Kernel SHAP algorithm explained in detail in
-Covert and Lee (2021). It is an iterative refinement of the original Kernel SHAP algorithm
-of Lundberg and Lee (2017).
-The algorithm is applied to each row in \code{X}. Due to its iterative nature, approximate
-standard errors of the resulting SHAP values are provided, and convergence is monitored.
-The data rows \code{X} to be explained and the
-background data \code{bg_X} should only contain feature columns required by the
-prediction function \code{pred_fun}. The latter is a function taking
-a data structure like \code{X} and \code{bg_X} and providing one numeric
-prediction per row.
-During each iteration, \code{m} subsets are evaluated until the worst standard error of the SHAP
-values is small enough relative to the range of the SHAP values. This exactly follows the logic
-used by Covert and Lee (2021).
+Implements a multidimensional version of the Kernel SHAP algorithm explained in
+detail in Covert and Lee (2021). It is an iterative refinement of the original
+Kernel SHAP algorithm of Lundberg and Lee (2017). The algorithm is applied to each
+row in \code{X}. Its behaviour depends on the number of features p:
+\itemize{
+\item 2 <= p <= 5: Exact Kernel SHAP values are returned.
+(Exact regarding the given background data.)
+\item p > 5: Sampling version of Kernel SHAP.
+The algorithm iterates until Kernel SHAP values are sufficiently accurate.
+Approximate standard errors of the SHAP values are returned.
+\item p = 1: Exact Shapley values are returned.
 }
+}
+\details{
+During each iteration, \code{m} feature subsets are evaluated until the worst
+standard error of the SHAP values is small enough relative to the range of the SHAP values.
+This stopping criterion was suggested in Covert and Lee (2021). In the multi-output case,
+the criterion must be fulfilled for each dimension separately until iteration stops.
+}
+\section{Methods (by class)}{
+\itemize{
+\item \code{kernelshap(default)}: Default Kernel SHAP method.
+
+\item \code{kernelshap(ranger)}: Kernel SHAP method for "ranger" models, see Readme for an example.
+
+\item \code{kernelshap(Learner)}: Kernel SHAP method for "mlr3" models, see Readme for an example.
+
+}}
 \examples{
+# Linear regression
 fit <- stats::lm(Sepal.Length ~ ., data = iris)
-pred_fun <- function(X) stats::predict(fit, X)
-s <- kernelshap(iris[1:2, -1], pred_fun = pred_fun, iris[-1])
+s <- kernelshap(fit, iris[1:2, -1], bg_X = iris)
 s
 
-# Matrix input works as well, and pred_fun may contain preprocessing steps.
-fit <- stats::lm(Sepal.Length ~ ., data = iris[1:4])
-pred_fun <- function(X) stats::predict(fit, as.data.frame(X))
-X <- data.matrix(iris[2:4])
-s <- kernelshap(X[1:3, ], pred_fun = pred_fun, X)
+# Multivariate model
+fit <- stats::lm(
+  as.matrix(iris[1:2]) ~ Petal.Length + Petal.Width + Species, data = iris
+)
+s <- kernelshap(fit, iris[1:4, 3:5], bg_X = iris)
 s
+
+# Matrix input works as well, and pred_fun can be overwritten
+fit <- stats::lm(Sepal.Length ~ ., data = iris[1:4])
+pred_fun <- function(fit, X) stats::predict(fit, as.data.frame(X))
+X <- data.matrix(iris[2:4])
+s <- kernelshap(fit, X[1:3, ], bg_X = X, pred_fun = pred_fun)
+s
+
+# Logistic regression
+fit <- stats::glm(
+  I(Species == "virginica") ~ Sepal.Length + Sepal.Width, 
+  data = iris, 
+  family = binomial
+)
+
+# On scale of linear predictor
+s <- kernelshap(fit, iris[1:2], bg_X = iris)
+s
+
+# On scale of response (probability)
+s <- kernelshap(fit, iris[1:2], bg_X = iris, type = "response")
+s
+
 }
 \references{
 \enumerate{

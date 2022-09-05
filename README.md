@@ -1,31 +1,40 @@
-# kernelshap <a href='https://github.com/mayer79/kernelshap'><img src='man/figures/logo.png' align="right" height="138.5" /></a>
+# The "kernelshap" package <a href='https://github.com/mayer79/kernelshap'><img src='man/figures/logo.png' align="right" height="138.5" /></a>
 
 ## Introduction
 
 SHAP values (Lundberg and Lee, 2017) decompose model predictions into additive contributions of the features in a fair way. A model agnostic approach is called Kernel SHAP, introduced in Lundberg and Lee (2017), and investigated in detail in Covert and Lee (2021). 
 
-The "kernelshap" package implements the Kernel SHAP Algorithm 1 described in the supplement of Covert and Lee (2021). An advantage of their algorithm is that SHAP values are supplemented by standard errors. Furthermore, convergence can be monitored and controlled.
+The "kernelshap" package implements a multidimensional version of the Kernel SHAP Algorithm 1 described in the supplement of Covert and Lee (2021). The behaviour depends on the number of features $p$:
 
-The main function `kernelshap()` has three key arguments:
+- $2 \le p \le 5$: Exact Kernel SHAP values are returned. (Exact regarding the given background data.)
+- $p > 5$: Sampling version of Kernel SHAP. The algorithm iterates until Kernel SHAP values are sufficiently accurate. Approximate standard errors of the SHAP values are returned.
+- $p = 1$: Exact Shapley values are returned.
 
-- `X`: A matrix or data.frame of rows to be explained. Important: The columns should only represent model features, not the response.
-- `pred_fun`: A function that takes a data structure like `X` and provides one numeric prediction per row. Some examples:
-  - `lm()`: `function(X) predict(fit, X)`
-  - `glm()`: `function(X) predict(fit, X)` (link scale) or
-  - `glm()`: `function(X) predict(fit, X, type = "response")` (response scale)
-  - `mgcv::gam()`: Same as for `glm()`
-  - Keras: `function(X) as.numeric(predict(fit, X))`
-  - mlr3: `function(X) fit$predict_newdata(X)$response`
-  - caret: `function(X) predict(fit, X)`
-- `bg_X`: The background data used to integrate out "switched off" features. It should have the same column structure as `X`. A good size is around $50-200$ rows.
+The main function `kernelshap()` has four key arguments:
+
+- `object`: Fitted model object.
+- `X`: A (n x p) `matrix`, `data.frame`, `tibble` or `data.table` of rows to be explained. Important: The columns should only represent model features, not the response.
+- `bg_X`: Background data used to integrate out "switched off" features, 
+often a subset of the training data (around 100 to 200 rows).
+It should contain the same columns as `X`.
+Columns not in `X` are silently dropped and the columns are arranged into
+the order as they appear in `X`.
+- `pred_fun`: Prediction function of the form `function(object, X, ...)`,
+providing K >= 1 numeric predictions per row. Its first argument represents the
+model `object`, its second argument a data structure like `X`.
+(The names of the first two arguments do not matter.) Additional (named)
+arguments are passed via `...` of `kernelshap()`. The default, `stats::predict`, will
+work in most cases. Some exceptions (classes "ranger" and mlr3 "Learner")
+are handled separately. In other cases, the function must be specified manually.
+
+Additional arguments of `kernelshap()` can be used to control details of the algorithm and to activate parallel processing.
 
 **Remarks**
 
-- *Visualization:* To visualize the result, you can use R package "shapviz".
-- *Meta-learners:* "kernelshap" plays well together with packages like "caret" and "mlr3".
-- *Case weights:* Passing `bg_w` allows to weight background data.
-- *Classification:* `kernelshap()` requires one numeric prediction per row. Thus, the prediction function should provide probabilities only of a selected class.
-- *Speed:* If `X` and `bg_X` are matrices, the algorithm can runs faster. The faster the prediction function, the more this matters.
+- To visualize the result, you can use R package "shapviz".
+- Passing `bg_w` allows to weight background data according to case weights.
+- The algorithm tends to run faster if `X` is a matrix or tibble.
+- In order to use parallel processing, the backend must be set up beforehand.
 
 ## Installation
 
@@ -34,17 +43,18 @@ The main function `kernelshap()` has three key arguments:
 devtools::install_github("mayer79/kernelshap")
 ```
 
-## Example: linear regression
+## Examples
+
+### Linear regression
 
 ```r
 library(kernelshap)
 library(shapviz)
 
 fit <- lm(Sepal.Length ~ ., data = iris)
-pred_fun <- function(X) predict(fit, X)
 
-# Crunch SHAP values (9 seconds)
-s <- kernelshap(iris[-1], pred_fun = pred_fun, bg_X = iris[-1])
+# Crunch SHAP values
+s <- kernelshap(fit, iris[-1], bg_X = iris)
 s
 
 # Output (partly)
@@ -53,13 +63,13 @@ s
 # [1,]  0.21951350    -1.955357   0.3149451 0.5823533
 # [2,] -0.02843097    -1.955357   0.3149451 0.5823533
 # 
-#  Corresponding standard errors:
-#       Sepal.Width Petal.Length  Petal.Width      Species
-# [1,] 1.526557e-15 1.570092e-16 1.110223e-16 1.554312e-15
-# [2,] 2.463307e-16 5.661049e-16 1.110223e-15 1.755417e-16
+ Corresponding standard errors:
+     Sepal.Width Petal.Length Petal.Width Species
+[1,]           0            0           0       0
+[2,]           0            0           0       0
 
 # Plot with shapviz
-shp <- shapviz(s)  # until shapviz 0.2.0: shapviz(s$S, s$X, s$baseline)
+shp <- shapviz(s)
 sv_waterfall(shp, 1)
 sv_importance(shp)
 sv_dependence(shp, "Petal.Length")
@@ -71,29 +81,130 @@ sv_dependence(shp, "Petal.Length")
 
 ![](man/figures/README-lm-dep.svg)
 
-## Example: logistic regression on probability scale
+### Logistic regression on probability scale
 
 ```r
 library(kernelshap)
 library(shapviz)
 
-fit <- glm(I(Species == "virginica") ~ Sepal.Length + Sepal.Width, data = iris, family = binomial)
-pred_fun <- function(X) predict(fit, X, type = "response")
+fit <- glm(
+  I(Species == "virginica") ~ Sepal.Length + Sepal.Width, data = iris, family = binomial
+)
 
-# Crunch SHAP values (4 seconds)
-s <- kernelshap(iris[1:2], pred_fun = pred_fun, bg_X = iris[1:2])
+# Crunch SHAP values
+s <- kernelshap(fit, iris[1:2], bg_X = iris, type = "response")
 
 # Plot with shapviz
-shp <- shapviz(s)  # until shapviz 0.2.0: shapviz(s$S, s$X, s$baseline)
+shp <- shapviz(s)
 sv_waterfall(shp, 51)
 sv_dependence(shp, "Sepal.Length")
 ```
-
 ![](man/figures/README-glm-waterfall.svg)
 
 ![](man/figures/README-glm-dep.svg)
 
-## Example: Keras neural net
+### Probability random forest (multivariate predictions)
+
+```r
+library(ranger)
+library(kernelshap)
+
+set.seed(1)
+fit <- ranger(Species ~ ., data = iris, probability = TRUE)
+
+s <- kernelshap(fit, iris[c(1, 51, 101), -5], bg_X = iris)
+s
+
+# 'kernelshap' object representing 
+#   - 3 SHAP matrices of dimension 3 x 4 
+#   - feature data.frame/matrix of dimension 3 x 4 
+#   - baseline: 0.3332606 0.3347014 0.332038 
+#   - average iterations: 2 
+#   - rows not converged: 0
+# 
+# SHAP values of first 2 observations:
+# [[1]]
+#      Sepal.Length  Sepal.Width Petal.Length Petal.Width
+# [1,]   0.02299032  0.008345772    0.3168792   0.3185242
+# [2,]  -0.01479279 -0.002066122   -0.1585125  -0.1578892
+# 
+# [[2]]
+#      Sepal.Length  Sepal.Width Petal.Length Petal.Width
+# [1,]   0.00190803 -0.004574378   -0.1615047  -0.1705303
+# [2,]   0.02443698  0.006684421    0.3157610   0.2942638
+# 
+# [[3]]
+#      Sepal.Length  Sepal.Width Petal.Length Petal.Width
+# [1,] -0.024898347 -0.003771394   -0.1553745  -0.1479938
+# [2,] -0.009644196 -0.004618300   -0.1572485  -0.1363747
+```
+
+### tidymodels
+
+```r
+library(tidymodels)
+library(kernelshap)
+
+iris_recipe <- iris %>%
+  recipe(Sepal.Length ~ .)
+
+reg <- linear_reg() %>%
+  set_engine("lm")
+  
+iris_wf <- workflow() %>%
+  add_recipe(iris_recipe) %>%
+  add_model(reg)
+
+fit <- iris_wf %>%
+  fit(iris)
+  
+ks <- kernelshap(fit, iris[, -1], bg_X = iris)
+ks
+```
+
+### mlr3
+
+```R
+library(mlr3)
+library(mlr3learners)
+library(kernelshap)
+library(shapviz)
+
+mlr_tasks$get("iris")
+tsk("iris")
+task_iris <- TaskRegr$new(id = "iris", backend = iris, target = "Sepal.Length")
+fit_lm <- lrn("regr.lm")
+fit_lm$train(task_iris)
+s <- kernelshap(fit_lm, iris, bg_X = iris)
+sv <- shapviz(s)
+sv_dependence(sv, "Species")
+```
+
+![](man/figures/README-mlr3-dep.svg)
+
+### caret
+
+```r
+library(caret)
+library(kernelshap)
+library(shapviz)
+
+fit <- train(
+  Sepal.Length ~ ., 
+  data = iris, 
+  method = "lm", 
+  tuneGrid = data.frame(intercept = TRUE),
+  trControl = trainControl(method = "none")
+)
+
+s <- kernelshap(fit, iris[1, -1], predict, bg_X = iris)
+sv <- shapviz(s)
+sv_waterfall(sv, 1)
+```
+
+![](man/figures/README-caret-waterfall.svg)
+
+### Keras neural net
 
 ```r
 library(kernelshap)
@@ -117,17 +228,14 @@ model %>%
   )
 
 X <- data.matrix(iris[2:4])
-pred_fun <- function(X) as.numeric(predict(model, X, batch_size = nrow(X)))
 
 # Crunch SHAP values
-
-# Takes about 40 seconds
 system.time(
-  s <- kernelshap(X, pred_fun = pred_fun, bg_X = X)
+  s <- kernelshap(model, X, bg_X = X, batch_size = 1000)
 )
 
-# Plot with shapviz
-shp <- shapviz(s)  # until shapviz 0.2.0: shapviz(s$S, s$X, s$baseline)
+# Plot with shapviz (results depend on neural net seed)
+shp <- shapviz(s)
 sv_waterfall(shp, 1)
 sv_importance(shp)
 sv_dependence(shp, "Petal.Length")
@@ -139,49 +247,54 @@ sv_dependence(shp, "Petal.Length")
 
 ![](man/figures/README-nn-dep.svg)
 
-### Example: mlr3
+## Parallel computing
 
-```R
-library(mlr3)
-library(mlr3learners)
-library(kernelshap)
-library(shapviz)
+As long as you have set up a parallel processing backend, parallel computing is supported via `foreach` and `%dorng`. The latter ensures that `set.seed()` will lead to reproducible results.
 
-mlr_tasks$get("iris")
-tsk("iris")
-task_iris <- TaskRegr$new(id = "iris", backend = iris, target = "Sepal.Length")
-fit_lm <- lrn("regr.lm")
-fit_lm$train(task_iris)
-s <- kernelshap(iris, function(X) fit_lm$predict_newdata(X)$response, bg_X = iris)
-sv <- shapviz(s)  # until shapviz 0.2.0: shapviz(s$S, s$X, s$baseline)
-sv_waterfall(sv, 1)
-sv_dependence(sv, "Species")
-```
-
-![](man/figures/README-mlr3-dep.svg)
-
-### Example: caret
+### Linear regression
 
 ```r
-library(caret)
 library(kernelshap)
-library(shapviz)
+library(doFuture)
 
-fit <- train(
-  Sepal.Length ~ ., 
-  data = iris, 
-  method = "lm", 
-  tuneGrid = data.frame(intercept = TRUE),
-  trControl = trainControl(method = "none")
+# Set up parallel backend
+registerDoFuture()
+plan(multisession, workers = 2)  # Windows
+# plan(multicore, workers = 2)   # Linux, macOS, Solaris
+
+fit <- stats::lm(Sepal.Length ~ ., data = iris)
+
+# With parallel computing
+system.time(
+  s <- kernelshap(fit, iris[, -1], bg_X = iris, parallel = TRUE)
 )
-
-s <- kernelshap(iris[1, -1], function(X) predict(fit, X), bg_X = iris[-1])
-sv <- shapviz(s)  # until shapviz 0.2.0: shapviz(s$S, s$X, s$baseline)
-sv_waterfall(sv, 1)
 ```
 
-![](man/figures/README-caret-waterfall.svg)
+### GAM on Windows
 
+On Windows, sometimes not all packages or global objects are passed to the parallel sessions. In this case, the necessary instructions to `foreach` can be specified through a named list via `parallel_args`, see the following example:
+
+```r
+library(mgcv)
+library(kernelshap)
+library(doFuture)
+
+# Set up parallel backend
+registerDoFuture()
+plan(multisession, workers = 2)
+
+fit <- gam(Sepal.Length ~ s(Sepal.Width) + Species, data = iris)
+
+s <- kernelshap(
+  fit, iris[-1], bg_X = iris, parallel = TRUE, parallel_args = list(.packages = "mgcv")
+)
+s
+
+SHAP values of first 2 observations:
+     Sepal.Width  Petal.Length  Petal.Width   Species
+[1,]  0.35570963 -5.551115e-17 2.775558e-16 -1.135187
+[2,] -0.04607082  3.552714e-15 3.885781e-15 -1.135187
+```
 
 ## References
 
