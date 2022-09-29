@@ -4,10 +4,12 @@
 
 SHAP values (Lundberg and Lee, 2017) decompose model predictions into additive contributions of the features in a fair way. A model agnostic approach is called Kernel SHAP, introduced in Lundberg and Lee (2017), and investigated in detail in Covert and Lee (2021). 
 
-The "kernelshap" package implements a multidimensional version of the Kernel SHAP Algorithm 1 described in the supplement of Covert and Lee (2021). The behaviour depends on the number of features $p$:
+The "kernelshap" package implements a multidimensional refinement of the Kernel SHAP Algorithm described in Covert and Lee (2021). The package allows to calculate Kernel SHAP values in an exact way, by iterative sampling (as in Covert and Lee, 2021), or by a hybrid of the two. As soon as sampling is involved, the algorithm iterates until convergence, and standard errors are provided.
 
-- $2 \le p \le 5$: Exact Kernel SHAP values are returned. (Exact regarding the given background data.)
-- $p > 5$: Sampling version of Kernel SHAP. The algorithm iterates until Kernel SHAP values are sufficiently accurate. Approximate standard errors of the SHAP values are returned.
+The default behaviour depends on the number of features $p$:
+
+- $2 \le p \le 8$: Exact Kernel SHAP values are returned. (Exact regarding the given background data.)
+- $p > 8$: Hybrid (partly exact) iterative version of Kernel SHAP. The algorithm iterates until Kernel SHAP values are sufficiently accurate.
 - $p = 1$: Exact Shapley values are returned.
 
 The main function `kernelshap()` has four key arguments:
@@ -15,7 +17,7 @@ The main function `kernelshap()` has four key arguments:
 - `object`: Fitted model object.
 - `X`: A (n x p) `matrix`, `data.frame`, `tibble` or `data.table` of rows to be explained. Important: The columns should only represent model features, not the response.
 - `bg_X`: Background data used to integrate out "switched off" features, 
-often a subset of the training data (around 100 to 200 rows).
+often a subset of the training data (around 100 to 500 rows).
 It should contain the same columns as `X`.
 Columns not in `X` are silently dropped and the columns are arranged into
 the order as they appear in `X`.
@@ -57,16 +59,10 @@ fit <- lm(Sepal.Length ~ ., data = iris)
 s <- kernelshap(fit, iris[-1], bg_X = iris)
 s
 
-# Output (partly)
 # SHAP values of first 2 observations:
 #      Sepal.Width Petal.Length Petal.Width   Species
 # [1,]  0.21951350    -1.955357   0.3149451 0.5823533
 # [2,] -0.02843097    -1.955357   0.3149451 0.5823533
-# 
- Corresponding standard errors:
-     Sepal.Width Petal.Length Petal.Width Species
-[1,]           0            0           0       0
-[2,]           0            0           0       0
 
 # Plot with shapviz
 shp <- shapviz(s)
@@ -113,14 +109,12 @@ set.seed(1)
 fit <- ranger(Species ~ ., data = iris, probability = TRUE)
 
 s <- kernelshap(fit, iris[c(1, 51, 101), -5], bg_X = iris)
-s
+summary(s)
 
-# 'kernelshap' object representing 
-#   - 3 SHAP matrices of dimension 3 x 4 
-#   - feature data.frame/matrix of dimension 3 x 4 
-#   - baseline: 0.3332606 0.3347014 0.332038 
-#   - average iterations: 2 
-#   - rows not converged: 0
+# Exact Kernel SHAP values
+#   - 3 SHAP matrices of dim 3 x 4
+#   - baseline: 0.3332606 0.3347014 0.332038
+#   - m_exact: 14
 # 
 # SHAP values of first 2 observations:
 # [[1]]
@@ -158,7 +152,9 @@ iris_wf <- workflow() %>%
 fit <- iris_wf %>%
   fit(iris)
   
-ks <- kernelshap(fit, iris[, -1], bg_X = iris)
+system.time(
+  ks <- kernelshap(fit, iris[, -1], bg_X = iris)
+)
 ks
 ```
 
@@ -175,7 +171,7 @@ tsk("iris")
 task_iris <- TaskRegr$new(id = "iris", backend = iris, target = "Sepal.Length")
 fit_lm <- lrn("regr.lm")
 fit_lm$train(task_iris)
-s <- kernelshap(fit_lm, iris, bg_X = iris)
+s <- kernelshap(fit_lm, iris[-1], bg_X = iris)
 sv <- shapviz(s)
 sv_dependence(sv, "Species")
 ```
@@ -197,7 +193,7 @@ fit <- train(
   trControl = trainControl(method = "none")
 )
 
-s <- kernelshap(fit, iris[1, -1], predict, bg_X = iris)
+s <- kernelshap(fit, iris[, -1], predict, bg_X = iris)
 sv <- shapviz(s)
 sv_waterfall(sv, 1)
 ```
@@ -264,13 +260,13 @@ plan(multisession, workers = 2)  # Windows
 
 fit <- stats::lm(Sepal.Length ~ ., data = iris)
 
-# With parallel computing
+# With parallel computing (run twice to see the difference)
 system.time(
   s <- kernelshap(fit, iris[, -1], bg_X = iris, parallel = TRUE)
 )
 ```
 
-### GAM on Windows
+### Parallel GAM on Windows
 
 On Windows, sometimes not all packages or global objects are passed to the parallel sessions. In this case, the necessary instructions to `foreach` can be specified through a named list via `parallel_args`, see the following example:
 
@@ -285,16 +281,86 @@ plan(multisession, workers = 2)
 
 fit <- gam(Sepal.Length ~ s(Sepal.Width) + Species, data = iris)
 
-s <- kernelshap(
-  fit, iris[-1], bg_X = iris, parallel = TRUE, parallel_args = list(.packages = "mgcv")
+system.time(
+  s <- kernelshap(
+    fit,  
+    iris[c(2, 5)], 
+    bg_X = iris, 
+    parallel = TRUE, 
+    parallel_args = list(.packages = "mgcv")
+  )
 )
 s
 
 SHAP values of first 2 observations:
-     Sepal.Width  Petal.Length  Petal.Width   Species
-[1,]  0.35570963 -5.551115e-17 2.775558e-16 -1.135187
-[2,] -0.04607082  3.552714e-15 3.885781e-15 -1.135187
+     Sepal.Width   Species
+[1,]  0.35570963 -1.135187
+[2,] -0.04607082 -1.135187
 ```
+
+## Exact/sampling/hybrid
+
+In above examples, since $p$ was small, exact Kernel SHAP values were calculated. Here, we want to show how to use the different strategies (exact, hybrid, and pure sampling) in a situation with ten features, see `?kernelshap` for details about those strategies.
+
+With ten features, a degree 2 hybrid is being used by default: 
+
+```r
+library(kernelshap)
+
+set.seed(1)
+X <- data.frame(matrix(rnorm(1000), ncol = 10))
+y <- rnorm(10000L)
+fit <- lm(y ~ ., data = cbind(y = y, X))
+
+s <- kernelshap(fit, X[1L, ], bg_X = X)
+summary(s)
+s$S[1:5]
+# Kernel SHAP values by the hybrid strategy of degree 2
+#   - SHAP matrix of dim 1 x 10
+#   - baseline: -0.005390948
+#   - average number of iterations: 2 
+#   - rows not converged: 0 
+#   - proportion exact: 0.9487952 
+#   - m/iter: 20
+#   - m_exact: 110
+# 0.0101998581  0.0027579289 -0.0002294437  0.0005337086  0.0001179876
+```
+
+The algorithm converged in the minimal possible number of two iterations and used $110 + 2\cdot 20 = 150$ on-off vectors $z$. For each $z$, predictions on a data set with the same size as the background data are done. Three calls to `predict()` were necessary (one for the exact part and one per sampling iteration).
+
+Since $p$ is not very large in this case, we can also force the algorithm to use exact calculations:
+
+```r
+s <- kernelshap(fit, X[1L, ], bg_X = X, exact = TRUE)
+summary(s)
+s$S[1:5]
+# Exact Kernel SHAP values
+#   - SHAP matrix of dim 1 x 10
+#   - baseline: -0.005390948
+#   - m_exact: 1022
+# 0.0101998581  0.0027579289 -0.0002294437  0.0005337086  0.0001179876
+```
+
+The results are identical. While more on-off vectors $z$ were required (1022), only a single call to `predict()` was necessary.
+
+Pure sampling (not recommended!) can be enforced by setting the hybrid degree to 0:
+
+```r
+s <- kernelshap(fit, X[1L, ], bg_X = X, hybrid_degree = 0)
+summary(s)
+s$S[1:5]
+# Kernel SHAP values by iterative sampling
+#   - SHAP matrix of dim 1 x 10
+#   - baseline: -0.005390948
+#   - average number of iterations: 2 
+#   - rows not converged: 0 
+#   - proportion exact: 0 
+#   - m/iter: 80
+#   - m_exact: 0
+# 0.0101998581  0.0027579289 -0.0002294437  0.0005337086  0.0001179876
+```
+
+The results are again identical here and the algorithm converged in two steps. In this case, two calls to `predict()` were necessary and a total of 160 $z$ vectors were required.
 
 ## References
 

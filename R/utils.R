@@ -1,92 +1,98 @@
 # Kernel SHAP algorithm for a single row x with paired sampling
-kernelshap_one <- function(object, X, bg_X, pred_fun, bg_w, v0, v1, 
-                           paired, m, exact, tol, max_iter, ...) {
-  p <- ncol(X)
+kernelshap_one <- function(x, v1, object, pred_fun, bg_w, exact, deg, 
+                           paired, m, tol, max_iter, v0, precalc, ...) {
+  p <- ncol(x)
+
+  # Calculate A_exact and b_exact
+  if (exact || deg >= 1L) {
+    A_exact <- precalc[["A"]]                                     #  (p x p)
+    bg_X_exact <- precalc[["bg_X_exact"]]                         #  (m_ex*n_bg x p)
+    Z <- precalc[["Z"]]                                           #  (m_ex x p)
+    m_exact <- nrow(Z)
+    v0_m_exact <- v0[rep(1L, m_exact), , drop = FALSE]            #  (m_ex x K)
+    
+    # Most expensive part
+    vz <- get_vz(                                                 #  (m_ex x K)
+      X = x[rep(1L, times = nrow(bg_X_exact)), , drop = FALSE],   #  (m_ex*n_bg x p)
+      bg = bg_X_exact,                                            #  (m_ex*n_bg x p)
+      Z = Z,                                                      #  (m_ex x p)
+      object = object, 
+      pred_fun = pred_fun, 
+      w = bg_w, 
+      ...
+    )
+    # Note: w is correctly replicated along columns of (vz - v0_m_exact)
+    b_exact <- crossprod(Z, precalc[["w"]] * (vz - v0_m_exact))   #  (p x K)
+    
+    # Some of the hybrid cases are exact as well
+    if (exact || trunc(p / 2) == deg) {
+      beta <- solver(A_exact, b_exact, constraint = v1 - v0)      #  (p x K)
+      return(list(beta = beta, sigma = 0 * beta, n_iter = 1L, converged = TRUE))  
+    }
+  } 
+  
+  # Iterative sampling part, always using A_exact and b_exact to fill up the weights
+  bg_X_m <- precalc[["bg_X_m"]]                                   #  (m*n_bg x p)
+  X <- x[rep(1L, times = nrow(bg_X_m)), , drop = FALSE]           #  (m*n_bg x p)
+  v0_m <- v0[rep(1L, m), , drop = FALSE]                          #  (m x K)
+
   est_m = list()
   converged <- FALSE
   n_iter <- 0L
-  Asum <- matrix(0, nrow = p, ncol = p)                           #  (p x p)
-  bsum <- matrix(0, nrow = p, ncol = ncol(v0))                    #  (p x K)
-  n_Z <- m * (1L + paired)
-  v0_ext <- v0[rep(1L, n_Z), , drop = FALSE]                      #  (n_Z x K)
+  A_sum <- matrix(0, nrow = p, ncol = p)                          #  (p x p)
+  b_sum <- matrix(0, nrow = p, ncol = ncol(v0))                   #  (p x K)
+  if (deg == 0L) {
+    A_exact <- A_sum
+    b_exact <- b_sum
+  }
   
   while(!isTRUE(converged) && n_iter < max_iter) {
     n_iter <- n_iter + 1L
-    
-    # Create Z matrix of dimension ->                             #  (n_Z x p)
-    if (exact) {
-      Z <- Z_exact[[p]]
-    } else {
-      Z <- sample_Z(m = m, p = p)
-      if (paired) {
-        Z <- rbind(Z, 1 - Z)
-      }
-    }
-    
-    # Calling get_vz() is expensive                               #  (n_Z x K)
+    input <- input_sampling(p = p, m = m, deg = deg, paired = paired)
+    Z <- input[["Z"]]
+      
+    # Expensive                                                              #  (m x K)
     vz <- get_vz(
-      X = X, bg = bg_X, Z = Z, object = object, pred_fun = pred_fun, w = bg_w, ...
+      X = X, bg = bg_X_m, Z = Z, object = object, pred_fun = pred_fun, w = bg_w, ...
     )
     
+    # The sum of weights of A_exact and input[["A"]] is 1, same for b
+    A_temp <- A_exact + input[["A"]]                                         #  (p x p)
+    b_temp <- b_exact + crossprod(Z, input[["w"]] * (vz - v0_m))             #  (p x K)
+    A_sum <- A_sum + A_temp                                                  #  (p x p)
+    b_sum <- b_sum + b_temp                                                  #  (p x K)
+    
     # Least-squares with constraint that beta_1 + ... + beta_p = v_1 - v_0. 
-    # The additional constraint beta_0 = v_0 is dealt via offset
-    Atemp <- crossprod(Z) / n_Z                                   #  (p x p)
-    btemp <- crossprod(Z, (vz - v0_ext)) / n_Z                    #  (p x K)
-    Asum <- Asum + Atemp                                          #  (p x p)
-    bsum <- bsum + btemp                                          #  (p x K)
-    est_m[[n_iter]] <- R <- solver(Atemp, btemp, v1, v0)          #  (p x K)
-    
-    if (exact) {
-      return(list(beta = R, sigma = 0 * R, n_iter = 1L, converged = TRUE))
-    }
-    
+    # The additional constraint beta_0 = v_0 is dealt via offset   
+    est_m[[n_iter]] <- solver(A_temp, b_temp, constraint = v1 - v0)          #  (p x K)
+
     # Covariance calculation would fail in the first iteration
     if (n_iter >= 2L) {
-      beta_n <- solver(Asum / n_iter, bsum / n_iter, v1, v0)      #  (p x K)
-      sigma_n <- get_sigma(est_m, iter = n_iter)                  #  (p x K)
+      beta_n <- solver(A_sum / n_iter, b_sum / n_iter, constraint = v1 - v0) #  (p x K)
+      sigma_n <- get_sigma(est_m, iter = n_iter)                             #  (p x K)
       converged <- all(conv_crit(sigma_n, beta_n) < tol)
     }
   }
   list(beta = beta_n, sigma = sigma_n, n_iter = n_iter, converged = converged)
 }
 
-# Calculates regression coefficients
-solver <- function(A, b, v1, v0) {
+# Regression coefficients given sum(beta) = constraint
+# A: (p x p), b: (p x k), constraint: (1 x K)
+solver <- function(A, b, constraint) {
   p <- ncol(A)
-  # Ainv <- solve(A)
   Ainv <- MASS::ginv(A)
-  s <- (matrix(colSums(Ainv %*% b), nrow = 1L) - v1 + v0) / sum(Ainv)  # (1 x K)
-  Ainv %*% (b - s[rep(1L, p), , drop = FALSE])                         # (p x K)
-}
-
-# m permutations distributed according to Kernel SHAP weights -> (m x p) matrix
-sample_Z <- function(m, p) {
-  if (p == 1L) {
-    stop("Sampling impossible for p = 1")
-  }
-  S <- 1:(p - 1)
-  # First draw number of elements in S
-  probs <- (p - 1) / (choose(p, S) * S * (p - S))
-  len_S <- sample(S, m, replace = TRUE, prob = probs)
-  
-  # Then, conditional on that number, set random positions to 1
-  # Can this be done without loop/vapply?
-  out <- vapply(
-    len_S, 
-    function(z) {out <- numeric(p); out[sample(1:p, z)] <- 1; out}, 
-    FUN.VALUE = numeric(p)
-  )
-  t(out)
+  s <- (matrix(colSums(Ainv %*% b), nrow = 1L) - constraint) / sum(Ainv)     #  (1 x K)
+  Ainv %*% (b - s[rep(1L, p), , drop = FALSE])                               #  (p x K)
 }
 
 # Calculates all vz of an iteration and thus takes time
 get_vz <- function(X, bg, Z, object, pred_fun, w, ...) {
-  n_Z <- nrow(Z)
+  m <- nrow(Z)
   not_Z <- !Z
-  n_bg <- nrow(bg) / n_Z   # because bg was replicated n_Z times
+  n_bg <- nrow(bg) / m   # because bg was replicated m times
   
-  # Replicate not_Z, so that X, bg, not_Z are all of dimension (n_Z*n_bg x p)
-  g <- rep(seq_len(n_Z), each = n_bg)
+  # Replicate not_Z, so that X, bg, not_Z are all of dimension (m*n_bg x p)
+  g <- rep(seq_len(m), each = n_bg)
   not_Z <- not_Z[g, , drop = FALSE]
   
   if (is.matrix(X)) {
@@ -103,7 +109,7 @@ get_vz <- function(X, bg, Z, object, pred_fun, w, ...) {
   if (is.null(w)) {
     return(rowsum(preds, group = g, reorder = FALSE) / n_bg)
   }
-  rowsum(preds * rep(w, times = n_Z), group = g, reorder = FALSE) / sum(w)
+  rowsum(preds * rep(w, times = m), group = g, reorder = FALSE) / sum(w)
 }
 
 # Weighted colMeans(). Always returns a (1 x ncol(x)) matrix
@@ -128,19 +134,6 @@ abind1 <- function(a) {
   out
 }
 
-# Calculate standard error from list of m estimates
-get_sigma <- function(est, iter) {
-  apply(abind1(est), 3L, FUN = function(Y) sqrt(diag(stats::cov(Y)) / iter))
-}
-
-# Convergence criterion
-conv_crit <- function(sig, bet) {
-  if (any(dim(sig) != dim(bet))) {
-    stop("sig must have same dimension as bet")
-  }
-  apply(sig, 2L, FUN = max) / apply(bet, 2L, FUN = function(z) diff(range(z)))
-}
-
 # Turn list of n (p x K) matrices into list of K (n x p) matrices. Reduce if K = 1.
 reorganize_list <- function(alist, nms) {
   if (!is.list(alist)) {
@@ -157,10 +150,15 @@ reorganize_list <- function(alist, nms) {
 
 # Checks and reshapes predictions to (n x K) matrix
 check_pred <- function(x, n) {
-  if (!is.vector(x) && !is.matrix(x) && !is.data.frame(x)) {
-    stop("Predictions must be a vector, matrix, or data.frame")
+  if (
+    !is.vector(x) && 
+    !is.matrix(x) && 
+    !is.data.frame(x) && 
+    !(is.array(x) && length(dim(x)) <= 2L)
+  ) {
+    stop("Predictions must be a vector, matrix, data.frame, or <=2D array")
   }
-  if (is.data.frame(x)) {
+  if (is.data.frame(x) || is.array(x)) {
     x <- as.matrix(x)
   }
   if (!is.numeric(x)) {
@@ -172,40 +170,57 @@ check_pred <- function(x, n) {
   if (length(x) == n) {
     return(matrix(x, nrow = n))
   }
-  stop("Predictions must be a length n vector or a matrix/data.frame with n rows.")
+  stop("Predictions must be a length n vector or a matrix/data.frame/array with n rows.")
 }
 
-# Informative warning if background data is small or large
-check_bg_size <- function(n) {
-  if (n > 1000L) {
-    warning("Your background data 'bg_X' is large, which will slow down the process. Consider using 100-200 rows.")
-  }
-  if (n < 20L) {
-    warning("Your background data 'bg_X' is small, which might lead to imprecise SHAP values. Consider using 100-200 rows.")
-  }
+# # Is background data too small or large?
+# check_bg_size <- function(n) {
+#   if (n > 1000L) {
+#     message("Your background data 'bg_X' is large, which will slow down the process. Consider using 100-200 rows.")
+#   }
+#   if (n < 20L) {
+#     message("Your background data 'bg_X' is small, which might lead to imprecise SHAP values. Consider using 100-200 rows.")
+#   }
+# }
+
+# # Given p and maximum m, determine hybrid degree (currently not used)
+# find_degree <- function(p, m_max) {
+#   if (p < 2L) {
+#     "p must be at least 2"
+#   }
+#   if (m_max < 2L * p) {
+#     return(list(degree = 0L, m_exact = 0L))
+#   }
+#   # Non-integers are rounded down
+#   S <- seq_len(p / 2)
+#   const <- (2L - (p == 2L * S))
+#   m_kum <- cumsum(const * choose(p, S))
+#   degree <- max(S[m_kum <= m_max])
+#   list(degree = degree, m_exact = m_kum[degree])
+# }
+
+# Helper function in print() and summary()
+head_list <- function(x, n) {
+  if (!is.list(x)) print(utils::head(x, n)) else print(lapply(x, utils::head, n))
 }
 
-# Case p = 1 returns exact Shapley values
-case_p1 <- function(n, nms, v0, v1, X) {
-  S <- v1 - v0[rep(1L, n), , drop = FALSE]
-  SE <- matrix(numeric(n), dimnames = list(NULL, nms))
-  if (ncol(v1) > 1L) {
-    SE <- replicate(ncol(v1), SE, simplify = FALSE)
-    S <- lapply(
-      asplit(S, MARGIN = 2L), function(M) as.matrix(M, dimnames = list(NULL, nms))
-    )
-  } else {
-    colnames(S) <- nms      
+# Describe what is happening
+summarize_strategy <- function(p, exact, deg) {
+  if (exact || trunc(p / 2) == deg) {
+    txt <- "Exact Kernel SHAP values"
+    if (!exact) {
+      txt <- paste(txt, "by the hybrid approach")
+    }
+    return(txt)
   }
-  out <- list(
-    S = S, 
-    X = X, 
-    baseline = as.vector(v0), 
-    SE = SE, 
-    n_iter = integer(n), 
-    converged = rep(TRUE, n)
-  )
-  class(out) <- "kernelshap"
-  out
+  if (deg == 0L) {
+    return("Kernel SHAP values by iterative sampling")
+  } 
+  paste("Kernel SHAP values by the hybrid strategy of degree", deg)
 }
 
+# Kernel weights normalized to a non-empty subset S of {1, ..., p-1}
+kernel_weights <- function(p, S = seq_len(p - 1L)) {
+  probs <- (p - 1L) / (choose(p, S) * S * (p - S))
+  probs / sum(probs)
+}
