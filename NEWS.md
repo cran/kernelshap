@@ -1,3 +1,11 @@
+# kernelshap 0.3.0.9000 DEVEL
+
+## Changes
+
+- New argument `feature_names` allows to specify the features to calculate SHAP values for. The default equals to `colnames(X)`. This should be changed only in situations when `X` (the dataset to be explained) contains non-feature columns.
+- The background dataset can now consist of a single row only. This is useful in situations with natural "off" value such as for image data or for models that can naturally deal with missing values.
+
+
 # kernelshap 0.3.0
 
 ## Major improvements
