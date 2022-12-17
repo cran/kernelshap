@@ -1,6 +1,6 @@
 Package: kernelshap
 Title: Kernel SHAP
-Version: 0.3.1
+Version: 0.3.2
 Authors@R: c(
     person("Michael", "Mayer", , "mayermichael79@gmail.com", role = c("aut", "cre")),
     person("David", "Watson", , "david.s.watson11@gmail.com", role = "ctb")
@@ -28,9 +28,9 @@ Config/testthat/edition: 3
 URL: https://github.com/mayer79/kernelshap
 BugReports: https://github.com/mayer79/kernelshap/issues
 NeedsCompilation: no
-Packaged: 2022-11-18 13:04:30 UTC; Michael
+Packaged: 2022-12-17 09:49:08 UTC; Michael
 Author: Michael Mayer [aut, cre],
   David Watson [ctb]
 Maintainer: Michael Mayer <mayermichael79@gmail.com>
 Repository: CRAN
-Date/Publication: 2022-11-18 13:40:02 UTC
+Date/Publication: 2022-12-17 10:00:02 UTC
