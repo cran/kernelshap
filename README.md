@@ -1,4 +1,7 @@
-# The "kernelshap" package <a href='https://github.com/mayer79/kernelshap'><img src='man/figures/logo.png' align="right" height="138.5" /></a>
+# kernelshap <a href='https://github.com/mayer79/kernelshap'><img src='man/figures/logo.png' align="right" height="138.5" /></a>
+
+[![CRAN version](http://www.r-pkg.org/badges/version/kernelshap)](https://cran.r-project.org/package=kernelshap) [![](https://cranlogs.r-pkg.org/badges/kernelshap)](https://cran.r-project.org/package=kernelshap) [![](https://cranlogs.r-pkg.org/badges/grand-total/kernelshap?color=orange)](https://cran.r-project.org/package=kernelshap)
+
 
 ## Introduction
 
@@ -28,6 +31,17 @@ Additional arguments of `kernelshap()` can be used to control details of the alg
 - Meta-learner packages like "tidyvmodels", "caret", or "mlr3" are straightforward to use.
 - In order to use parallel processing, the backend must be set up beforehand, see the example below.
 
+## Installation
+
+``` r
+# From CRAN
+install.packages("kernelshap")
+
+# Or the newest version from GitHub:
+# install.packages("devtools")
+devtools::install_github("mayer79/kernelshap")
+```
+
 ## Workflow to explain any model
 
 The typical workflow to explain any model with Kernel SHAP:
@@ -44,13 +58,13 @@ If the training data is small, use the full training data.
 Let's illustrate this on the diamonds data in the "ggplot2" package.
 
 ```r
-library(tidyverse)
+library(ggplot2)
 library(kernelshap)
 library(shapviz)
 
 # Prepare data
-diamonds <- diamonds %>% 
-  mutate(
+diamonds <- transform(
+  diamonds,
   log_price = log(price), 
   log_carat = log(carat)
 )
@@ -93,9 +107,9 @@ We can also explain a specific prediction instead of the full model:
 ```r
 single_row <- diamonds[5000, xvars]
 
-fit_lm %>% 
-  kernelshap(single_row, bg_X = bg_X) %>% 
-  shapviz() %>% 
+fit_lm |>
+  kernelshap(single_row, bg_X = bg_X) |> 
+  shapviz() |>
   sv_waterfall()
 ```
 
@@ -118,6 +132,8 @@ fit_rf <- ranger(
 
 # 4) Crunch
 shap_rf <- kernelshap(fit_rf, X, bg_X = bg_X)
+shap_rf
+
 # SHAP values of first 2 observations:
 #       log_carat     clarity      color         cut
 # [1,]  1.1987785  0.09578879 -0.1397765 0.002761832
@@ -141,22 +157,22 @@ Or a deep neural net (results not fully reproducible):
 ```r
 library(keras)
 
-1) Fit
+# 1) Fit
 nn <- keras_model_sequential()
-nn %>% 
-  layer_dense(units = 30, activation = "relu", input_shape = 4) %>% 
-  layer_dense(units = 15, activation = "relu") %>% 
+nn |>
+  layer_dense(units = 30, activation = "relu", input_shape = 4) |>
+  layer_dense(units = 15, activation = "relu") |>
   layer_dense(units = 1)
 
-nn %>% 
-  compile(optimizer = optimizer_adam(learning_rate = 0.1), loss = "mse")
+nn |>
+  compile(optimizer = optimizer_adam(0.1), loss = "mse")
 
 cb <- list(
   callback_early_stopping(patience = 20),
   callback_reduce_lr_on_plateau(patience = 5)
 )
        
-nn %>% 
+nn |>
   fit(
     x = data.matrix(diamonds[xvars]),
     y = diamonds$log_price,
@@ -183,7 +199,7 @@ sv_dependence(sv_nn, "clarity", color_var = "auto")
 
 ## Parallel computing
 
-As long as you have set up a parallel processing backend, parallel computing is supported via `foreach` and `%dorng%`. The latter ensures that `set.seed()` will lead to reproducible results. No progress bar though...
+As long as you have set up a parallel processing backend, parallel computing is supported via `foreach`. This will deactivate the progress bar.
 
 ### Example: Linear regression continued
 
@@ -212,13 +228,16 @@ library(mgcv)
 fit_gam <- gam(log_price ~ s(log_carat) + clarity + color + cut, data = diamonds)
 
 # 4) Crunch
-shap_gam <- kernelshap(
-  fit_gam, 
-  X, 
-  bg_X = bg_X,
-  parallel = TRUE, 
-  parallel_args = list(.packages = "mgcv")
+system.time(
+  shap_gam <- kernelshap(
+    fit_gam, 
+    X, 
+    bg_X = bg_X,
+    parallel = TRUE, 
+    parallel_args = list(.packages = "mgcv")
+  )
 )
+
 shap_gam
 
 # SHAP values of first 2 observations:
@@ -293,6 +312,71 @@ s$S[1:5]
 ```
 
 The results are again identical here and the algorithm converged in two steps. In this case, two calls to `predict()` were necessary and a total of 160 $z$ vectors were required.
+
+## Meta-learning Packages
+
+Here, we provide some working examples for "tidymodels", "caret", and "mlr3":
+
+### tidymodels
+
+```r
+library(tidymodels)
+library(kernelshap)
+
+iris_recipe <- iris %>%
+  recipe(Sepal.Length ~ .)
+
+reg <- linear_reg() %>%
+  set_engine("lm")
+  
+iris_wf <- workflow() %>%
+  add_recipe(iris_recipe) %>%
+  add_model(reg)
+
+fit <- iris_wf %>%
+  fit(iris)
+  
+ks <- kernelshap(fit, iris[, -1], bg_X = iris)
+ks
+```
+
+### caret
+
+```r
+library(caret)
+library(kernelshap)
+library(shapviz)
+
+fit <- train(
+  Sepal.Length ~ ., 
+  data = iris, 
+  method = "lm", 
+  tuneGrid = data.frame(intercept = TRUE),
+  trControl = trainControl(method = "none")
+)
+
+s <- kernelshap(fit, iris[, -1], predict, bg_X = iris)
+sv <- shapviz(s)
+sv_waterfall(sv, 1)
+```
+
+### mlr3
+
+```r
+library(mlr3)
+library(mlr3learners)
+library(kernelshap)
+library(shapviz)
+
+mlr_tasks$get("iris")
+tsk("iris")
+task_iris <- TaskRegr$new(id = "iris", backend = iris, target = "Sepal.Length")
+fit_lm <- lrn("regr.lm")
+fit_lm$train(task_iris)
+s <- kernelshap(fit_lm, iris[-1], bg_X = iris)
+sv <- shapviz(s)
+sv_dependence(sv, "Species")
+```
 
 ## References
 
