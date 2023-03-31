@@ -1,8 +1,17 @@
-# kernelshap <a href='https://github.com/mayer79/kernelshap'><img src='man/figures/logo.png' align="right" height="138.5" /></a>
+# kernelshap <a href='https://github.com/ModelOriented/kernelshap'><img src='man/figures/logo.png' align="right" height="139"/></a>
 
-[![CRAN version](http://www.r-pkg.org/badges/version/kernelshap)](https://cran.r-project.org/package=kernelshap) [![](https://cranlogs.r-pkg.org/badges/kernelshap)](https://cran.r-project.org/package=kernelshap) [![](https://cranlogs.r-pkg.org/badges/grand-total/kernelshap?color=orange)](https://cran.r-project.org/package=kernelshap)
+<!-- badges: start -->
 
-## Introduction
+[![CRAN status](http://www.r-pkg.org/badges/version/kernelshap)](https://cran.r-project.org/package=kernelshap)
+[![R-CMD-check](https://github.com/ModelOriented/kernelshap/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/ModelOriented/kernelshap/actions)
+[![Codecov test coverage](https://codecov.io/gh/ModelOriented/kernelshap/branch/main/graph/badge.svg)](https://app.codecov.io/gh/ModelOriented/kernelshap?branch=main)
+
+[![](https://cranlogs.r-pkg.org/badges/kernelshap)](https://cran.r-project.org/package=kernelshap) 
+[![](https://cranlogs.r-pkg.org/badges/grand-total/kernelshap?color=orange)](https://cran.r-project.org/package=kernelshap)
+
+<!-- badges: end -->
+
+## Overview
 
 This package offers an efficient implementation of Kernel SHAP, see [1] and [2]. For up to $p=8$ features, the resulting SHAP values are exact regarding the selected background data. For larger $p$, an almost exact hybrid algorithm involving iterative sampling is used by default.
 
@@ -12,7 +21,7 @@ The typical workflow to explain any model `object`:
 2. **Select background data:** Kernel SHAP requires a representative background dataset `bg_X` to calculate marginal means. For this purpose, set aside 50 to 500 rows from the training data.
 If the training data is small, use the full training data. In cases with a natural "off" value (like MNIST digits), this can also be a single row with all values set to the off value.
 3. **Crunch:** Use `kernelshap(object, X, bg_X, ...)` to calculate SHAP values. Runtime is proportional to `nrow(X)`, while memory consumption scales linearly in `nrow(bg_X)`.
-4. **Analyze:** Use the "shapviz" package to visualize the result.
+4. **Analyze:** Use {shapviz} to visualize the result.
 
 **Remarks**
 
@@ -20,7 +29,17 @@ If the training data is small, use the full training data. In cases with a natur
 - By changing the defaults, the iterative pure sampling approach in [2] can be enforced.
 - Case weights are supported via the argument `bg_w`.
 
-## Illustration
+## Installation
+
+```r
+# From CRAN
+install.packages("kernelshap")
+
+# Or the development version:
+devtools::install_github("ModelOriented/kernelshap")
+```
+
+## Usage
 
 Let's model diamonds prices!
 
@@ -61,7 +80,7 @@ shap_lm
 # 4) Analyze
 sv_lm <- shapviz(shap_lm)
 sv_importance(sv_lm)
-sv_dependence(sv_lm, "log_carat")
+sv_dependence(sv_lm, "log_carat", color_var = NULL)
 ```
 
 ![](man/figures/README-lm-imp.svg)
@@ -105,7 +124,7 @@ shap_rf
 
 sv_rf <- shapviz(shap_rf)
 sv_importance(sv_rf, kind = "bee", show_numbers = TRUE)
-sv_dependence(sv_rf, "log_carat", color_var = "auto")
+sv_dependence(sv_rf, "log_carat")
 ```
 
 ![](man/figures/README-rf-imp.jpeg)
@@ -148,7 +167,7 @@ shap_nn <- kernelshap(nn, X, bg_X = bg_X, pred_fun = pred_fun)
 
 sv_nn <- shapviz(shap_nn)
 sv_importance(sv_nn, show_numbers = TRUE)
-sv_dependence(sv_nn, "clarity", color_var = "auto")
+sv_dependence(sv_nn, "clarity")
 ```
 
 ![](man/figures/README-nn-imp.svg)

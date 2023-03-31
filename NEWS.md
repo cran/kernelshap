@@ -1,3 +1,19 @@
+# kernelshap 0.3.5
+
+## Maintenance
+
+- New contributor: Przemyslaw Biecek - welcome on board!
+- My new cozy home: https://github.com/ModelOriented/kernelshap
+- Webpage created with "pkgdown"
+- Introduced Github workflows
+- More unit tests
+
+## Small visible changes
+
+- Removed the `ks_extract()` function. It was designed to extract objects like the matrix `S` of SHAP values from the resulting "kernelshap" object `x`. We feel that the standard extraction options (`x$S`, `x[["S"]]`, or `getElement(x, "S")`) are sufficient.
+- Adding $(n \times K)$ matrix of predictions to the output, where $n$ is the number of rows in the explainer data `X`, and $K$ is the dimension of a single prediction (usually 1).
+- Setting `verbose = FALSE` now does not suppress the warning on too large background data anymore. Use `suppressWarnings()` instead.
+
 # kernelshap 0.3.4
 
 ## Documentation

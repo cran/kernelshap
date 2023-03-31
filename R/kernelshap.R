@@ -107,7 +107,7 @@
 #' @param ... Additional arguments passed to \code{pred_fun(object, X, ...)}.
 #' @return An object of class "kernelshap" with the following components:
 #' \itemize{
-#'   \item \code{S}: (n x p) matrix with SHAP values or, if the model output has dimension K > 1,
+#'   \item \code{S}: A (n x p) matrix with SHAP values or, if the model output has dimension K > 1,
 #'   a list of K such matrices.
 #'   \item \code{X}: Same as input argument \code{X}.
 #'   \item \code{baseline}: A vector of length K representing the average prediction on the background data.
@@ -119,6 +119,7 @@
 #'   \item \code{prop_exact}: Proportion of the Kernel SHAP weight distribution covered by exact calculations.
 #'   \item \code{exact}: Logical flag indicating whether calculations are exact or not.
 #'   \item \code{txt}: Summary text.
+#'   \item \code{predictions}: A (n x K) matrix of predictions of \code{X}.
 #' }
 #' @references
 #' \enumerate{
@@ -237,10 +238,10 @@ kernelshap.default <- function(object, X, bg_X, pred_fun = stats::predict,
   if (verbose) {
     message(txt)
   }
-  if (verbose && max(m, m_exact) * bg_n > 2e5) {
+  if (max(m, m_exact) * bg_n > 2e5) {
     warning("\nPredictions on large data sets with ", max(m, m_exact), "x", bg_n,
-            " observations are being done. Consider reducing the computational burden ",
-            "(e.g. exact = FALSE, low hybrid_degree, smaller background data, smaller m)")
+            " observations are being done.\n",
+            "Consider reducing the computational burden (e.g. use smaller X_bg)")
   }
   
   # Apply Kernel SHAP to each row of X
@@ -308,7 +309,8 @@ kernelshap.default <- function(object, X, bg_X, pred_fun = stats::predict,
     m_exact = m_exact,
     prop_exact = prop_exact,
     exact = exact || trunc(p / 2) == hybrid_degree,
-    txt = txt
+    txt = txt,
+    predictions = v1
   )
   class(out) <- "kernelshap"
   out
