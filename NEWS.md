@@ -1,3 +1,9 @@
+# kernelshap 0.3.6
+
+## Maintenance
+
+- Improved help files and README
+
 # kernelshap 0.3.5
 
 ## Maintenance
