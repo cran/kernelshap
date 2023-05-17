@@ -1,8 +1,8 @@
-e900929a037602b561b6bbe8ca02ca4a *DESCRIPTION
+746289eee93787f11d6fff46dbd5727a *DESCRIPTION
 bc7c9c3873a71195887d5d787520832f *NAMESPACE
-89292e21af5611666ebf418de0af53bd *NEWS.md
+26a0cb25ae619abe37e034ee9a82cff7 *NEWS.md
 a5fa02776c2217bc14a379b158f61541 *R/exact.R
-ffa458aea3d4dc10b326fc405f6db6ca *R/kernelshap.R
+cc70df3445bcb8f36cec5596eab28aaa *R/kernelshap.R
 42d21245d92c649842ce5184cc509a7b *R/methods.R
 b42a0e56dc8186e4764a74ee27ce63f7 *R/sampling.R
 dc2f15fb8a6f5787551f9a01f466c9e1 *R/utils.R
@@ -16,7 +16,7 @@ c395960a586e10d6ecdff3c913fb88ba *man/figures/README-lm-imp.svg
 6b5ea35e4c37ad9dbf0b77873b92079f *man/figures/README-rf-imp.jpeg
 afa7017096ff2a1e1bd5b007b6104e95 *man/figures/logo.png
 3c57839d0e383749cafcb1b2e1183729 *man/is.kernelshap.Rd
-c1adee25fa8c1b7503dea6d3d5e7b2ce *man/kernelshap.Rd
+eefb5341b27a8e8f1a461accc7ccf621 *man/kernelshap.Rd
 0559f7c9fe599a361223e6fc1e8b341b *man/print.kernelshap.Rd
 a2869dd27fb3d62185a886b674fdb412 *man/summary.kernelshap.Rd
 722846fe47e264a745ba92bd666aa5ca *tests/testthat.R
