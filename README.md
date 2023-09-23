@@ -66,14 +66,14 @@ X <- diamonds[sample(nrow(diamonds), 1000), xvars]
 # 2) Select background data
 bg_X <- diamonds[sample(nrow(diamonds), 200), ]
 
-# 3) Crunch SHAP values for all 1000 rows of X (~6 seconds)
+# 3) Crunch SHAP values for all 1000 rows of X (~7 seconds)
 system.time(
   shap_lm <- kernelshap(fit_lm, X, bg_X = bg_X)
 )
 shap_lm
 
 # SHAP values of first 2 observations:
-#           carat    clarity       color         cut
+#       log_carat    clarity       color         cut
 # [1,]  1.2692479  0.1081900 -0.07847065 0.004630899
 # [2,] -0.4499226 -0.1111329  0.11832292 0.026503850
 
@@ -188,7 +188,7 @@ registerDoFuture()
 plan(multisession, workers = 4)  # Windows
 # plan(multicore, workers = 4)   # Linux, macOS, Solaris
 
-# ~3 seconds on second run
+# ~3 seconds
 system.time(
   s <- kernelshap(fit_lm, X, bg_X = bg_X, parallel = TRUE)
 )
@@ -203,7 +203,7 @@ library(mgcv)
 
 fit_gam <- gam(log_price ~ s(log_carat) + clarity + color + cut, data = diamonds)
 
-system.time(
+system.time(  # 11 seconds
   shap_gam <- kernelshap(
     fit_gam, 
     X, 
@@ -271,19 +271,24 @@ sv_waterfall(sv, 1)
 ### mlr3
 
 ```r
+library(kernelshap)
 library(mlr3)
 library(mlr3learners)
-library(kernelshap)
-library(shapviz)
 
+# Regression
 mlr_tasks$get("iris")
-tsk("iris")
-task_iris <- TaskRegr$new(id = "iris", backend = iris, target = "Sepal.Length")
+task_iris <- TaskRegr$new(id = "reg", backend = iris, target = "Sepal.Length")
 fit_lm <- lrn("regr.lm")
 fit_lm$train(task_iris)
 s <- kernelshap(fit_lm, iris[-1], bg_X = iris)
-sv <- shapviz(s)
-sv_dependence(sv, "Species")
+s
+
+# Probabilistic classification -> lrn(..., predict_type = "prob")
+task_iris <- TaskClassif$new(id = "class", backend = iris, target = "Species")
+fit_rf <- lrn("classif.ranger", predict_type = "prob", num.trees = 50)
+fit_rf$train(task_iris)
+s <- kernelshap(fit_rf, X = iris[-5], bg_X = iris)
+s
 ```
 
 ## References

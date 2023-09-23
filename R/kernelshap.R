@@ -3,14 +3,26 @@
 #' Efficient implementation of Kernel SHAP, see Lundberg and Lee (2017), and 
 #' Covert and Lee (2021), abbreviated by CL21.
 #' For up to \eqn{p=8} features, the resulting Kernel SHAP values are exact regarding 
-#' the selected background data. For larger \eqn{p}, an almost exact hybrid algorithm 
-#' involving iterative sampling is used, see Details.
+#' the selected background data. For larger \eqn{p}, an almost exact 
+#' hybrid algorithm involving iterative sampling is used, see Details.
 #'
-#' Pure iterative Kernel SHAP sampling as in Covert and Lee (2021) 
-#' works by randomly sample \eqn{m} on-off vectors \eqn{z} so that their sum follows the 
-#' SHAP Kernel weight distribution (normalized to the range \eqn{\{1, \dots, p-1\}}. 
-#' Based on these vectors, many predictions are formed. Then, Kernel SHAP values are 
-#' derived as the solution of a constrained linear regression. 
+#' Pure iterative Kernel SHAP sampling as in Covert and Lee (2021) works like this:
+#' 
+#' 1. A binary "on-off" vector \eqn{z} is drawn from \eqn{\{0, 1\}^p} 
+#'   such that its sum follows the SHAP Kernel weight distribution 
+#'   (normalized to the range \eqn{\{1, \dots, p-1\}}).
+#' 2. For each \eqn{j} with \eqn{z_j = 1}, the \eqn{j}-th column of the 
+#'   original background data is replaced by the corresponding feature value \eqn{x_j} 
+#'   of the observation to be explained.
+#' 3. The average prediction \eqn{v_z} on the data of Step 2 is calculated, and the
+#'   average prediction \eqn{v_0} on the background data is subtracted.
+#' 4. Steps 1 to 3 are repeated \eqn{m} times. This produces a binary \eqn{m \times p}
+#'   matrix \eqn{Z} (each row equals one of the \eqn{z}) and a vector \eqn{v} of
+#'   shifted predictions.
+#' 5. \eqn{v} is regressed onto \eqn{Z} under the constraint that the sum of the
+#'   coefficients equals \eqn{v_1 - v_0}, where \eqn{v_1} is the prediction of the 
+#'   observation to be explained. The resulting coefficients are the Kernel SHAP values.
+#' 
 #' This is repeated multiple times until convergence, see CL21 for details.
 #' 
 #' A drawback of this strategy is that many (at least 75%) of the \eqn{z} vectors will 
@@ -139,7 +151,7 @@
 #' @export
 #' @examples
 #' # MODEL ONE: Linear regression
-#' fit <- stats::lm(Sepal.Length ~ ., data = iris)
+#' fit <- lm(Sepal.Length ~ ., data = iris)
 #' 
 #' # Select rows to explain (only feature columns)
 #' X_explain <- iris[1:2, -1]
@@ -153,9 +165,7 @@
 #' s
 #' 
 #' # MODEL TWO: Multi-response linear regression
-#' fit <- stats::lm(
-#'   as.matrix(iris[1:2]) ~ Petal.Length + Petal.Width + Species, data = iris
-#' )
+#' fit <- lm(as.matrix(iris[1:2]) ~ Petal.Length + Petal.Width + Species, data = iris)
 #' s <- kernelshap(fit, iris[1:4, 3:5], bg_X = bg_X)
 #' summary(s)
 #' 
@@ -209,16 +219,16 @@ kernelshap.default <- function(object, X, bg_X, pred_fun = stats::predict,
   }
   
   # Calculate v1 and v0
-  v1 <- check_pred(pred_fun(object, X, ...), n = n)  # Predictions on X:        n x K
-  bg_preds <- check_pred(
-    pred_fun(object, bg_X[, colnames(X), drop = FALSE], ...), n = bg_n
-  )
+  v1 <- align_pred(pred_fun(object, X, ...))         # Predictions on X:        n x K
+  bg_preds <- align_pred(pred_fun(object, bg_X[, colnames(X), drop = FALSE], ...))
   v0 <- weighted_colMeans(bg_preds, bg_w)            # Average pred of bg data: 1 x K
   
   # For p = 1, exact Shapley values are returned
   if (p == 1L) {
     return(
-      case_p1(n = n, nms = feature_names, v0 = v0, v1 = v1, X = X, verbose = verbose)
+      case_p1(
+        n = n, feature_names = feature_names, v0 = v0, v1 = v1, X = X, verbose = verbose
+      )
     )
   }
   
@@ -230,7 +240,11 @@ kernelshap.default <- function(object, X, bg_X, pred_fun = stats::predict,
   
   # Precalculations for the real Kernel SHAP
   if (exact || hybrid_degree >= 1L) {
-    precalc <- if (exact) input_exact(p) else input_partly_exact(p, hybrid_degree)
+    if (exact) {
+      precalc <- input_exact(p, feature_names = feature_names)
+    } else {
+      precalc <- input_partly_exact(p, deg = hybrid_degree, feature_names = feature_names)
+    }
     m_exact <- nrow(precalc[["Z"]])
     prop_exact <- sum(precalc[["w"]])
     precalc[["bg_X_exact"]] <- bg_X[rep(seq_len(bg_n), times = m_exact), , drop = FALSE]
@@ -276,7 +290,7 @@ kernelshap.default <- function(object, X, bg_X, pred_fun = stats::predict,
     )
   } else {
     if (verbose && n >= 2L) {
-      pb <- utils::txtProgressBar(1L, n, style = 3)  
+      pb <- utils::txtProgressBar(max = n, style = 3)  
     }
     res <- vector("list", n)
     for (i in seq_len(n)) {
@@ -309,10 +323,10 @@ kernelshap.default <- function(object, X, bg_X, pred_fun = stats::predict,
     warning("\nNon-convergence for ", sum(!converged), " rows.")
   }
   out <- list(
-    S = reorganize_list(lapply(res, `[[`, "beta"), nms = feature_names), 
+    S = reorganize_list(lapply(res, `[[`, "beta")), 
     X = X, 
     baseline = as.vector(v0), 
-    SE = reorganize_list(lapply(res, `[[`, "sigma"), nms = feature_names), 
+    SE = reorganize_list(lapply(res, `[[`, "sigma")), 
     n_iter = vapply(res, `[[`, "n_iter", FUN.VALUE = integer(1L)),
     converged = converged,
     m = m,
@@ -360,7 +374,7 @@ kernelshap.ranger <- function(object, X, bg_X,
 #' @describeIn kernelshap Kernel SHAP method for "mlr3" models, see Readme for an example.
 #' @export
 kernelshap.Learner <- function(object, X, bg_X,
-                               pred_fun = function(m, X) m$predict_newdata(X)$response,
+                               pred_fun = NULL,
                                feature_names = colnames(X),
                                bg_w = NULL, exact = length(feature_names) <= 8L,
                                hybrid_degree = 1L + length(feature_names) %in% 4:16,
@@ -368,6 +382,9 @@ kernelshap.Learner <- function(object, X, bg_X,
                                m = 2L * length(feature_names) * (1L + 3L * (hybrid_degree == 0L)),
                                tol = 0.005, max_iter = 100L, parallel = FALSE,
                                parallel_args = NULL, verbose = TRUE, ...) {
+  if (is.null(pred_fun)) {
+    pred_fun <- mlr3_pred_fun(object, X = X)
+  }
   kernelshap.default(
     object = object,
     X = X,
@@ -387,4 +404,3 @@ kernelshap.Learner <- function(object, X, bg_X,
     ...
   )
 }
-
