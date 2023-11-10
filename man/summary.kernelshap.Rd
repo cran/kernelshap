@@ -2,18 +2,16 @@
 % Please edit documentation in R/methods.R
 \name{summary.kernelshap}
 \alias{summary.kernelshap}
-\title{Summary Method}
+\title{Summarizes "kernelshap" Object}
 \usage{
 \method{summary}{kernelshap}(object, compact = FALSE, n = 2L, ...)
 }
 \arguments{
 \item{object}{An object of class "kernelshap".}
 
-\item{compact}{Set to \code{TRUE} to hide printing the top n SHAP values,
-standard errors and feature values.}
+\item{compact}{Set to \code{TRUE} for a more compact summary.}
 
-\item{n}{Maximum number of rows of SHAP values, standard errors and feature values
-to print.}
+\item{n}{Maximum number of rows of SHAP values etc. to print.}
 
 \item{...}{Further arguments passed from other methods.}
 }
@@ -21,11 +19,11 @@ to print.}
 Invisibly, the input is returned.
 }
 \description{
-Summary Method
+Summarizes "kernelshap" Object
 }
 \examples{
-fit <- stats::lm(Sepal.Length ~ ., data = iris)
-s <- kernelshap(fit, iris[1:3, -1], bg_X = iris[-1])
+fit <- lm(Sepal.Length ~ ., data = iris)
+s <- kernelshap(fit, iris[1:3, -1], bg_X = iris[, -1])
 summary(s)
 }
 \seealso{

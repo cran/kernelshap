@@ -1,6 +1,4 @@
-#' Print Method
-#' 
-#' Prints the first two rows of the matrix (or matrices) of SHAP values. 
+#' Prints "kernelshap" Object
 #'
 #' @param x An object of class "kernelshap".
 #' @param n Maximum number of rows of SHAP values to print.
@@ -8,29 +6,42 @@
 #' @returns Invisibly, the input is returned.
 #' @export
 #' @examples
-#' fit <- stats::lm(Sepal.Length ~ ., data = iris)
-#' s <- kernelshap(fit, iris[1:3, -1], bg_X = iris[-1])
+#' fit <- lm(Sepal.Length ~ ., data = iris)
+#' s <- kernelshap(fit, iris[1:3, -1], bg_X = iris[, -1])
 #' s
 #' @seealso [kernelshap()]
 print.kernelshap <- function(x, n = 2L, ...) {
-  cat("SHAP values of first", n, "observations:\n")
+  cat("SHAP values of first observations:\n")
   print(head_list(getElement(x, "S"), n = n))
   invisible(x)
 }
 
-#' Summary Method
+#' Prints "permshap" Object
+#' 
+#' @param x An object of class "permshap".
+#' @inheritParams print.kernelshap
+#' @inherit print.kernelshap return
+#' @export
+#' @examples
+#' fit <- lm(Sepal.Length ~ ., data = iris)
+#' s <- permshap(fit, iris[1:3, -1], bg_X = iris[, -1])
+#' s
+#' @seealso [permshap()]
+print.permshap <- function(x, n = 2L, ...) {
+  print.kernelshap(x, n = n, ...)
+}
+
+#' Summarizes "kernelshap" Object
 #'
 #' @param object An object of class "kernelshap".
-#' @param compact Set to `TRUE` to hide printing the top n SHAP values, 
-#'   standard errors and feature values. 
-#' @param n Maximum number of rows of SHAP values, standard errors and feature values 
-#'   to print.
+#' @param compact Set to `TRUE` for a more compact summary. 
+#' @param n Maximum number of rows of SHAP values etc. to print.
 #' @param ... Further arguments passed from other methods.
 #' @returns Invisibly, the input is returned.
 #' @export
 #' @examples
-#' fit <- stats::lm(Sepal.Length ~ ., data = iris)
-#' s <- kernelshap(fit, iris[1:3, -1], bg_X = iris[-1])
+#' fit <- lm(Sepal.Length ~ ., data = iris)
+#' s <- kernelshap(fit, iris[1:3, -1], bg_X = iris[, -1])
 #' summary(s)
 #' @seealso [kernelshap()]
 summary.kernelshap <- function(object, compact = FALSE, n = 2L, ...) {
@@ -58,7 +69,7 @@ summary.kernelshap <- function(object, compact = FALSE, n = 2L, ...) {
   }
   cat("\n  - m_exact:", getElement(object, "m_exact"))
   if (!compact) {
-    cat("\n\nSHAP values of first", n, "observations:\n")
+    cat("\n\nSHAP values of first observations:\n")
     print(head_list(S, n = n))
     if (!ex) {
       cat("\nCorresponding standard errors:\n")
@@ -66,6 +77,21 @@ summary.kernelshap <- function(object, compact = FALSE, n = 2L, ...) {
     }
   }
   invisible(object)
+}
+
+#' Summarizes "permshap" Object
+#'
+#' @param object An object of class "permshap".
+#' @inheritParams summary.kernelshap
+#' @inherit summary.kernelshap return
+#' @export
+#' @examples
+#' fit <- lm(Sepal.Length ~ ., data = iris)
+#' s <- permshap(fit, iris[1:3, -1], bg_X = iris[, -1])
+#' summary(s)
+#' @seealso [permshap()]
+summary.permshap <- function(object, compact = FALSE, n = 2L, ...) {
+  summary.kernelshap(object, compact = compact, n = n, ...)
 }
 
 #' Check for kernelshap
@@ -76,11 +102,28 @@ summary.kernelshap <- function(object, compact = FALSE, n = 2L, ...) {
 #' @returns `TRUE` if `object` is of class "kernelshap", and `FALSE` otherwise.
 #' @export
 #' @examples
-#' fit <- stats::lm(Sepal.Length ~ ., data = iris)
-#' s <- kernelshap(fit, iris[1:2, -1], bg_X = iris[-1])
+#' fit <- lm(Sepal.Length ~ ., data = iris)
+#' s <- kernelshap(fit, iris[1:2, -1], bg_X = iris[, -1])
 #' is.kernelshap(s)
 #' is.kernelshap("a")
 #' @seealso [kernelshap()]
 is.kernelshap <- function(object){
   inherits(object, "kernelshap")
+}
+
+#' Check for permshap
+#'
+#' Is object of class "permshap"?
+#'
+#' @param object An R object.
+#' @returns `TRUE` if `object` is of class "permshap", and `FALSE` otherwise.
+#' @export
+#' @examples
+#' fit <- lm(Sepal.Length ~ ., data = iris)
+#' s <- permshap(fit, iris[1:2, -1], bg_X = iris[, -1])
+#' is.permshap(s)
+#' is.permshap("a")
+#' @seealso [kernelshap()]
+is.permshap <- function(object){
+  inherits(object, "permshap")
 }

@@ -2,7 +2,7 @@
 % Please edit documentation in R/methods.R
 \name{print.kernelshap}
 \alias{print.kernelshap}
-\title{Print Method}
+\title{Prints "kernelshap" Object}
 \usage{
 \method{print}{kernelshap}(x, n = 2L, ...)
 }
@@ -17,11 +17,11 @@
 Invisibly, the input is returned.
 }
 \description{
-Prints the first two rows of the matrix (or matrices) of SHAP values.
+Prints "kernelshap" Object
 }
 \examples{
-fit <- stats::lm(Sepal.Length ~ ., data = iris)
-s <- kernelshap(fit, iris[1:3, -1], bg_X = iris[-1])
+fit <- lm(Sepal.Length ~ ., data = iris)
+s <- kernelshap(fit, iris[1:3, -1], bg_X = iris[, -1])
 s
 }
 \seealso{

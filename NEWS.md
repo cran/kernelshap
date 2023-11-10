@@ -1,3 +1,15 @@
+# kernelshap 0.4.0
+
+## Major changes
+
+- Added `permshap()` to calculate exact permutation SHAP values. The function currently works for up to 14 features.
+- Factor-valued predictions are now supported. Each level is represented by its dummy variable.
+
+## Other changes
+
+- Slight speed-up.
+- Integer valued case weights are now turned into doubles to avoid integer overflow.
+
 # kernelshap 0.3.8
 
 ## API improvements
