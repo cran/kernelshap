@@ -11,7 +11,7 @@ test_that("head_list(x)[[1L]] = head(x[[1L]]) for list of matries x", {
   expect_equal(head_list(x)[[1L]], utils::head(x[[1L]]))
 })
 
-test_that("regoranize_list() fails for non-list inputs", {
+test_that("reorganize_list() fails for non-list inputs", {
   expect_error(reorganize_list(alist = 1:10))
 })
 
@@ -31,6 +31,26 @@ test_that("exact_Z() works for both kernel- and permshap", {
   expect_equal(colnames(r1), nm)
   expect_equal(dim(r1), c(2^p, p))
 })
+
+test_that("rep_rows() gives the same as usual subsetting (except rownames)", {
+  setrn <- function(x) {rownames(x) <- 1:nrow(x); x}
+  
+  expect_equal(rep_rows(iris, 1), iris[1, ])
+  expect_equal(rep_rows(iris, 2:1), setrn(iris[2:1, ]))
+  expect_equal(rep_rows(iris, c(1, 1, 1)), setrn(iris[c(1, 1, 1), ]))
+  
+  ir <- iris[1, ]
+  ir$y <- list(list(a = 1, b = 2))
+  expect_equal(rep_rows(ir, c(1, 1)), setrn(ir[c(1, 1), ]))
+})
+
+test_that("rep_rows() gives the same as usual subsetting for matrices", {
+  ir <- data.matrix(iris[1:4])
+  
+  expect_equal(rep_rows(ir, c(1, 1, 2)), ir[c(1, 1, 2), ])
+  expect_equal(rep_rows(ir, 1), ir[1, , drop = FALSE])
+})
+
 
 # Unit tests copied from {hstats}
 
@@ -59,4 +79,34 @@ test_that("fdummy() respects factor level order", {
   d2 <- fdummy(x2)
   expect_equal(d1, d2[, colnames(d1)])
   expect_equal(colnames(d1), rev(colnames(d2)))
+})
+
+test_that("wrowmean_vector() works for 1D matrices", {
+  x2 <- cbind(a = 6:1)
+  out2 <- wrowmean_vector(x2, ngroups = 2L)
+  expec <- rowsum(x2, group = rep(1:2, each = 3)) / 3
+  rownames(expec) <- NULL
+  
+  expect_error(wrowmean_vector(matrix(1:4, ncol = 2L)))
+  expect_equal(out2, expec)
+
+  expect_equal(wrowmean_vector(x2, ngroups = 3L), cbind(a = c(5.5, 3.5, 1.5)))
+  
+  # Constant weights have no effect
+  expect_equal(wrowmean_vector(x2, ngroups = 2L, w = c(1, 1, 1)), out2)
+  expect_equal(wrowmean_vector(x2, ngroups = 2L, w = c(4, 4, 4)), out2)
+  
+  # Non-constant weights
+  a <- weighted.mean(6:4, 1:3)
+  b <- weighted.mean(3:1, 1:3)
+  out2 <- wrowmean_vector(x2, ngroups = 2L, w = 1:3)
+  expect_equal(out2, cbind(a = c(a, b)))
+})
+
+test_that("rowmean_factor() works for factor input", {
+  x <- factor(c("C", "A", "C", "C", "A", "A"))
+  out <- rowmean_factor(x, ngroups = 2L)
+  
+  expect_true(is.matrix(out))
+  expect_equal(out, cbind(A = c(1/3, 2/3), C = c(2/3, 1/3)))
 })

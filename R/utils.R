@@ -1,3 +1,26 @@
+#' Fast Row Subsetting
+#' 
+#' Internal function used to row-subset data.frames.
+#' Brings a massive speed-up for data.frames. All other classes (tibble, data.table,
+#' matrix) are subsetted in the usual way.
+#' 
+#' @noRd
+#' @keywords internal
+#' 
+#' @param x A matrix-like object.
+#' @param i Logical or integer vector of rows to pick.
+#' @returns Subsetted version of `x`.
+rep_rows <- function(x, i) {
+  if (!(all(class(x) == "data.frame"))) {
+    return(x[i, , drop = FALSE])  # matrix, tibble, data.table, ...
+  }
+  # data.frame
+  out <- lapply(x, function(z) if (length(dim(z)) != 2L) z[i] else z[i, , drop = FALSE])
+  attr(out, "row.names") <- .set_row_names(length(i))
+  class(out) <- "data.frame"
+  out
+}
+
 #' Weighted Version of colMeans()
 #' 
 #' Internal function used to calculate column-wise weighted means.
@@ -9,13 +32,11 @@
 #' @param w Optional case weights.
 #' @returns A (1 x ncol(x)) matrix of column means.
 wcolMeans <- function(x, w = NULL, ...) {
-  if (NCOL(x) == 1L && is.null(w)) {
-    return(as.matrix(mean(x)))
-  }
   if (!is.matrix(x)) {
     x <- as.matrix(x)
   }
-  rbind(if (is.null(w)) colMeans(x) else colSums(x * w) / sum(w))
+  out <- if (is.null(w)) colMeans(x) else colSums(x * w) / sum(w)
+  t.default(out)
 }
 
 #' All on-off Vectors
@@ -68,13 +89,21 @@ get_vz <- function(X, bg, Z, object, pred_fun, w, ...) {
       X[[v]][s] <- bg[[v]][s]
     }
   }
-  preds <- align_pred(pred_fun(object, X, ...))
+  preds <- align_pred(pred_fun(object, X, ...), ohe = FALSE)
   
-  # Aggregate
+  # Aggregate (distinguishing some faster cases)
+  if (is.factor(preds)) {
+    if (is.null(w)) {
+      return(rowmean_factor(preds, ngroups = m))
+    }
+    preds <- fdummy(preds)
+  }
+  if (ncol(preds) == 1L) {
+    return(wrowmean_vector(preds, ngroups = m, w = w))
+  }
   if (is.null(w)) {
     return(rowsum(preds, group = g, reorder = FALSE) / n_bg)
   }
-  # w is recycled over rows and columns
   rowsum(preds * w, group = g, reorder = FALSE) / sum(w)
 }
 
@@ -119,7 +148,7 @@ reorganize_list <- function(alist) {
   lapply(out, as.matrix)
 }
 
-#' Aligns Predictions
+#' Aligns Predictions (adapted from {hstats})
 #'
 #' Turns predictions into matrix.
 #'
@@ -127,15 +156,16 @@ reorganize_list <- function(alist) {
 #' @keywords internal
 #'
 #' @param x Object representing model predictions.
-#' @returns Like `x`, but converted to matrix.
-align_pred <- function(x) {
+#' @param ohe If `x` is a factor: should it be one-hot encoded? Default is `TRUE`.
+#' @returns Like `x`, but converted to matrix (or a factor).
+align_pred <- function(x, ohe = TRUE) {
   if (is.data.frame(x) && ncol(x) == 1L) {
     x <- x[[1L]]
   }
-  if (is.factor(x)) {
+  if (ohe && is.factor(x)) {
     return(fdummy(x))
   }
-  if (is.matrix(x)) x else as.matrix(x)
+  if (is.matrix(x) || is.factor(x)) x else as.matrix(x)
 }
 
 #' Head of List Elements
@@ -243,6 +273,51 @@ fdummy <- function(x) {
   out 
 }
 
+#' Grouped Means for Single-Column Matrices (adapted from {hstats})
+#'
+#' Grouped means for matrix with single column over fixed-length groups.
+#'
+#' @noRd
+#' @keywords internal
+#'
+#' @param x Matrix with one column.
+#' @param ngroups Number of subsequent, equals sized groups.
+#' @param w Optional vector of case weights of length `NROW(x) / ngroups`.
+#' @returns Matrix with one column.
+wrowmean_vector <- function(x, ngroups = 1L, w = NULL) {
+  if (ncol(x) != 1L) {
+    stop("x must have a single column")
+  }
+  nm <- colnames(x)
+  dim(x) <- c(length(x) %/% ngroups, ngroups)
+  out <- if (is.null(w)) colMeans(x) else colSums(x * w) / sum(w)
+  dim(out) <- c(ngroups, 1L)
+  if (!is.null(nm)) {
+    colnames(out) <- nm
+  }
+  out
+}
+
+#' rowmean_vector() for factors (copied from {hstats})
+#'
+#' Grouped `colMeans_factor()` for equal sized groups.
+#'
+#' @noRd
+#' @keywords internal
+#'
+#' @param x Factor-like.
+#' @param ngroups Number of subsequent, equals sized groups.
+#' @returns Matrix with column names.
+rowmean_factor <- function(x, ngroups = 1L) {
+  x <- as.factor(x)
+  lev <- levels(x)
+  n_bg <- length(x) %/% ngroups
+  dim(x) <- c(n_bg, ngroups)
+  out <- t.default(apply(x, 2L, FUN = tabulate, nbins = length(lev)))
+  colnames(out) <- lev
+  out / n_bg
+}
+
 #' Basic Input Checks
 #' 
 #' @noRd
@@ -297,7 +372,11 @@ warning_burden <- function(m, bg_n) {
 #' 
 #' @returns TRUE or an error
 prep_w <- function(w, bg_n) {
-  stopifnot(length(w) == bg_n, all(w >= 0), !all(w == 0))
+  stopifnot(
+    length(w) == bg_n, 
+    all(w >= 0), 
+    !all(w == 0)
+  )
   if (!is.double(w)) as.double(w) else w
 }
 

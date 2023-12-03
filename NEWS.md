@@ -1,3 +1,16 @@
+# kernelshap 0.4.1
+
+## Performance improvements
+
+- Significant speed-up for pure data.frames, i.e., no data.tables or tibbles.
+- Some small performance improvements, e.g., for factor predictions and univariate predictions.
+- Slight speed-up of `permshap()` by caching calculations for the two special permutations of all 0 and all 1. Consequently, the `m_exact` component in the output is reduced by 2.
+
+## Documentation
+
+- Rewrote many examples in the README.
+- Added reference to Erik Strumbelj and Ivan Kononeko (2014).
+
 # kernelshap 0.4.0
 
 ## Major changes

@@ -1,7 +1,7 @@
 #' Permutation SHAP
 #'
-#' Exact permutation SHAP values with respect to a background dataset.
-#' The function is currently limited to maximum 14 features.
+#' Exact permutation SHAP algorithm with respect to a background dataset,
+#' see Strumbelj and Kononenko. The function works for up to 14 features.
 #'
 #' @inheritParams kernelshap
 #' @returns
@@ -16,6 +16,9 @@
 #'     (currently `TRUE`).
 #'   - `txt`: Summary text.
 #'   - `predictions`: \eqn{(n \times K)} matrix with predictions of `X`.
+#' @references
+#'   1. Erik Strumbelj and Igor Kononenko. Explaining prediction models and individual 
+#'     predictions with feature contributions. Knowledge and Information Systems 41, 2014.
 #' @export
 #' @examples
 #' # MODEL ONE: Linear regression
@@ -57,7 +60,12 @@ permshap.default <- function(object, X, bg_X, pred_fun = stats::predict,
                              verbose = TRUE, ...) {
   basic_checks(X = X, bg_X = bg_X, feature_names = feature_names, pred_fun = pred_fun)
   p <- length(feature_names)
-  stopifnot("Permutation SHAP only supported for up to 14 features" = p <= 14L)
+  if (p <= 1L) {
+    stop("Case p = 1 not implemented. Use kernelshap() instead.")
+  }
+  if (p > 14L) {
+    stop("Permutation SHAP only supported for up to 14 features")
+  }
   n <- nrow(X)
   bg_n <- nrow(bg_X)
   if (!is.null(bg_w)) {
@@ -68,7 +76,7 @@ permshap.default <- function(object, X, bg_X, pred_fun = stats::predict,
     message(txt)
   }
   
-  # Baseline and predictions on explanation data (latter not required in algo)
+  # Baseline and predictions on explanation data
   bg_preds <- align_pred(pred_fun(object, bg_X[, colnames(X), drop = FALSE], ...))
   v0 <- wcolMeans(bg_preds, bg_w)            # Average pred of bg data: 1 x K
   v1 <- align_pred(pred_fun(object, X, ...)) # Predictions on X:        n x K
@@ -81,11 +89,11 @@ permshap.default <- function(object, X, bg_X, pred_fun = stats::predict,
   
   # Precalculations that are identical for each row to be explained
   Z <- exact_Z(p, feature_names = feature_names, keep_extremes = TRUE)
-  m_exact <- nrow(Z)
+  m_exact <- nrow(Z) - 2L  # We won't evaluate vz for first and last row
   precalc <- list(
     Z = Z,
-    Z_code = rowpaste(Z),
-    bg_X_rep = bg_X[rep(seq_len(bg_n), times = m_exact), , drop = FALSE]
+    Z_code = rowpaste(Z), 
+    bg_X_rep = rep_rows(bg_X, rep.int(seq_len(bg_n), m_exact))
   )
   
   if (m_exact * bg_n > 2e5) {
@@ -97,9 +105,11 @@ permshap.default <- function(object, X, bg_X, pred_fun = stats::predict,
     parallel_args <- c(list(i = seq_len(n)), parallel_args)
     res <- do.call(foreach::foreach, parallel_args) %dopar% permshap_one(
       x = X[i, , drop = FALSE],
+      v1 = v1[i, , drop = FALSE], 
       object = object,
       pred_fun = pred_fun,
       bg_w = bg_w,
+      v0 = v0,
       precalc = precalc,
       ...
     )
@@ -111,9 +121,11 @@ permshap.default <- function(object, X, bg_X, pred_fun = stats::predict,
     for (i in seq_len(n)) {
       res[[i]] <- permshap_one(
         x = X[i, , drop = FALSE],
+        v1 = v1[i, , drop = FALSE], 
         object = object,
         pred_fun = pred_fun,
         bg_w = bg_w,
+        v0 = v0,
         precalc = precalc,
         ...
       )
