@@ -4,7 +4,7 @@
 
 [![CRAN status](http://www.r-pkg.org/badges/version/kernelshap)](https://cran.r-project.org/package=kernelshap)
 [![R-CMD-check](https://github.com/ModelOriented/kernelshap/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/ModelOriented/kernelshap/actions)
-[![Codecov test coverage](https://codecov.io/gh/ModelOriented/kernelshap/branch/main/graph/badge.svg)](https://app.codecov.io/gh/ModelOriented/kernelshap?branch=main)
+[![Codecov test coverage](https://codecov.io/gh/ModelOriented/kernelshap/graph/badge.svg)](https://app.codecov.io/gh/ModelOriented/kernelshap?branch=main)
 
 [![](https://cranlogs.r-pkg.org/badges/kernelshap)](https://cran.r-project.org/package=kernelshap) 
 [![](https://cranlogs.r-pkg.org/badges/grand-total/kernelshap?color=orange)](https://cran.r-project.org/package=kernelshap)
@@ -13,10 +13,13 @@
 
 ## Overview
 
-The package contains two workhorses to calculate SHAP values for any model:
+The package contains two workhorses to calculate SHAP values for *any* model:
 
 - `permshap()`: Exact permutation SHAP algorithm of [1]. Available for up to $p=14$ features.
 - `kernelshap()`: Kernel SHAP algorithm of [2] and [3]. By default, exact Kernel SHAP is used for up to $p=8$ features, and an almost exact hybrid algorithm otherwise.
+
+Furthermore, the function `additive_shap()` produces SHAP values for additive models fitted via `lm()`, `glm()`, `mgcv::gam()`, `mgcv::bam()`, `gam::gam()`,
+ `survival::coxph()`, or `survival::survreg()`. It is exponentially faster than `permshap()` and `kernelshap()`, with identical results.
 
 ### Kernel SHAP or permutation SHAP?
 
@@ -38,6 +41,7 @@ If the training data is small, use the full training data. In cases with a natur
 - Factor-valued predictions are automatically turned into one-hot-encoded columns.
 - Case weights are supported via the argument `bg_w`.
 - By changing the defaults in `kernelshap()`, the iterative pure sampling approach in [3] can be enforced.
+- The `additive_shap()` explainer is easier to use: Only the model and `X` are required.
 
 ## Installation
 
@@ -215,6 +219,18 @@ sv_dependence(ps, xvars)
 
 ![](man/figures/README-nn-dep.svg)
 
+### Additive SHAP
+
+The additive explainer extracts the additive contribution of each feature from a model of suitable class.
+
+```r
+fit <- lm(log(price) ~ log(carat) + color + clarity + cut, data = diamonds)
+shap_values <- additive_shap(fit, diamonds) |> 
+  shapviz()
+sv_importance(shap_values)
+sv_dependence(shap_values, v = "carat", color_var = NULL)
+```
+
 ### Multi-output models
 
 {kernelshap} supports multivariate predictions like:
@@ -249,9 +265,11 @@ ps_class <- permshap(fit_class, X = iris[, -5], bg_X = iris)
 
 ![](man/figures/README-prob-dep.svg)
 
-### Tidymodels
+### Meta-learners
 
-Meta-learning packages like {tidymodels}, {caret} or {mlr3} are straight-forward to use. The following example additionally shows that the `...` argument of `permshap()` and `kernelshap()` is passed to `predict()`.
+Meta-learning packages like {tidymodels}, {caret} or {mlr3} are straightforward to use. The following examples additionally shows that the `...` arguments of `permshap()` and `kernelshap()` are passed to `predict()`.
+
+#### Tidymodels
 
 ```r
 library(kernelshap)
@@ -283,6 +301,56 @@ $.pred_setosa
      Sepal.Length Sepal.Width Petal.Length Petal.Width
 [1,]   0.02186111 0.012137778    0.3658278   0.2667667
 [2,]   0.02628333 0.001315556    0.3683833   0.2706111
+```
+
+#### caret
+
+```r
+library(kernelshap)
+library(caret)
+
+fit <- train(
+  Sepal.Length ~ ., 
+  data = iris, 
+  method = "lm", 
+  tuneGrid = data.frame(intercept = TRUE),
+  trControl = trainControl(method = "none")
+)
+
+ps <- permshap(fit, iris[-1], bg_X = iris)
+```
+
+#### mlr3
+
+```r
+library(kernelshap)
+library(mlr3)
+library(mlr3learners)
+
+set.seed(1)
+
+task_classif <- TaskClassif$new(id = "1", backend = iris, target = "Species")
+learner_classif <- lrn("classif.rpart", predict_type = "prob")
+learner_classif$train(task_classif)
+
+predict(learner_classif, head(iris))  # setosa setosa        # Classes
+predict(learner_classif, head(iris), predict_type = "prob")  # Probs per class
+
+x <- learner_classif$selected_features()
+
+# For *probabilistic* classification, pass predict_type = "prob" to mlr3's predict()
+ps <- permshap(
+  learner_classif, X = iris, bg_X = iris, feature_names = x, predict_type = "prob"
+)
+ps
+# $setosa
+#      Petal.Length Petal.Width
+# [1,]    0.6666667           0
+# [2,]    0.6666667           0
+
+# Non-probabilistic classification uses auto-OHE internally
+ps <- permshap(learner_classif, X = iris, bg_X = iris, feature_names = x)
+ps
 ```
 
 ## References
