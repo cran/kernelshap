@@ -1,9 +1,11 @@
 Package: kernelshap
 Title: Kernel SHAP
-Version: 0.5.0
+Version: 0.6.0
 Authors@R: c(
-    person("Michael", "Mayer", , "mayermichael79@gmail.com", role = c("aut", "cre")),
-    person("David", "Watson", , "david.s.watson11@gmail.com", role = "aut"),
+    person("Michael", "Mayer", , "mayermichael79@gmail.com", role = c("aut", "cre"),
+           comment = c(ORCID = "0009-0007-2540-9629")),
+    person("David", "Watson", , "david.s.watson11@gmail.com", role = "aut",
+           comment = c(ORCID = "0000-0001-9632-2159")),
     person("Przemyslaw", "Biecek", , "przemyslaw.biecek@gmail.com", role = "ctb",
            comment = c(ORCID = "0000-0001-8423-1823"))
   )
@@ -17,17 +19,17 @@ Description: Efficient implementation of Kernel SHAP, see Lundberg and Lee
 License: GPL (>= 2)
 Depends: R (>= 3.2.0)
 Encoding: UTF-8
-RoxygenNote: 7.3.1
-Imports: foreach, stats, utils
+RoxygenNote: 7.3.2
+Imports: foreach, MASS, stats, utils
 Suggests: doFuture, testthat (>= 3.0.0)
 Config/testthat/edition: 3
 URL: https://github.com/ModelOriented/kernelshap
 BugReports: https://github.com/ModelOriented/kernelshap/issues
 NeedsCompilation: no
-Packaged: 2024-05-26 19:40:37 UTC; Michael
-Author: Michael Mayer [aut, cre],
-  David Watson [aut],
+Packaged: 2024-07-12 15:53:00 UTC; Michael
+Author: Michael Mayer [aut, cre] (<https://orcid.org/0009-0007-2540-9629>),
+  David Watson [aut] (<https://orcid.org/0000-0001-9632-2159>),
   Przemyslaw Biecek [ctb] (<https://orcid.org/0000-0001-8423-1823>)
 Maintainer: Michael Mayer <mayermichael79@gmail.com>
 Repository: CRAN
-Date/Publication: 2024-05-26 20:10:03 UTC
+Date/Publication: 2024-07-12 19:40:05 UTC
