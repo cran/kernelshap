@@ -1,3 +1,66 @@
+# kernelshap 0.8.0
+
+### Major improvement
+
+`permshap()` has received a sampling version, which is useful if the number of features p is larger than 8.
+The algorithm iterates until the resulting values are sufficiently precise.
+Additionally, standard errors are provided ([#152](https://github.com/ModelOriented/kernelshap/pull/152)).
+
+During each iteration, the algorithm cycles twice through a random permutation:
+It starts with all feature components "turned on" (i.e., taking them
+from the observation to be explained), then gradually turning off components
+according to the permutation (i.e., marginalizing them over the background data).
+When all components are turned off, the algorithm - one by one - turns the components
+back on, until all components are turned on again. This antithetic scheme allows to
+evaluate Shapley's formula 2p times with each permutation, using a total of
+2p + 1 evaluations of marginal means.
+
+For models with interactions up to order two, one can show that
+even a single iteration provides exact SHAP values (with respect to the
+given background dataset).
+
+The Python implementation "shap" uses a similar approach, but without
+providing standard errors, and without early stopping. To mimic its behavior,
+we would need to set `max_iter = p` in R, and `max_eval = (2*p+1)*p` in Python.
+
+For faster convergence, we use balanced permutations in the sense that
+p subsequent permutations each start with a different feature.
+Furthermore, the 2p on-off vectors with sum <=1 or >=p-1 are evaluated only once,
+similar to the degree 1 hybrid in [kernelshap()] (but covering less weight).
+
+### User visible changes
+
+- In exact mode, `kernelshap()` does not return the following elements anymore:
+  `m` (= 0), `converged` (all `TRUE`), `n_iter` (all 1), and `SE` (all values 0) ([#153](https://github.com/ModelOriented/kernelshap/pull/153)).
+- In sampling mode of `kernelshap()`, above elements have been moved to the end of the output list ([#153](https://github.com/ModelOriented/kernelshap/pull/153)).
+- Removed unpaired sampling in `kernelshap()` ([#154](https://github.com/ModelOriented/kernelshap/pull/154)).
+- The stopping criterion in sampling mode of `kernelshap()` used a slightly too strict convergence rule.
+  This has been relaxed in [#156](https://github.com/ModelOriented/kernelshap/pull/156).
+- 
+### Documentation
+
+- New DESCRIPTION file.
+- Adapted docstrings to reflect above changes ([#155](https://github.com/ModelOriented/kernelshap/pull/155))
+
+### Maintenance
+
+- Improve code coverage ([#156](https://github.com/ModelOriented/kernelshap/pull/156)).
+
+### Bug fixes
+
+- `kernelshap()` with `max_iter = 1` will now work ([#160](https://github.com/ModelOriented/kernelshap/pull/160)).
+
+# kernelshap 0.7.1 (not on CRAN)
+
+## Documentation
+
+- More compact README.
+- Updated function description.
+
+## Maintenance
+
+- Update code coverage version ([#150](https://github.com/ModelOriented/kernelshap/pull/150)).
+
 # kernelshap 0.7.0
 
 This release is intended to be the last before stable version 1.0.0.

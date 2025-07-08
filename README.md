@@ -3,7 +3,7 @@
 <!-- badges: start -->
 
 [![R-CMD-check](https://github.com/ModelOriented/kernelshap/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/ModelOriented/kernelshap/actions/workflows/R-CMD-check.yaml)
-[![Codecov test coverage](https://codecov.io/gh/ModelOriented/kernelshap/graph/badge.svg)](https://app.codecov.io/gh/ModelOriented/kernelshap?branch=main)
+[![Codecov test coverage](https://codecov.io/gh/ModelOriented/kernelshap/graph/badge.svg)](https://app.codecov.io/gh/ModelOriented/kernelshap)
 [![CRAN_Status_Badge](https://www.r-pkg.org/badges/version/kernelshap)](https://cran.r-project.org/package=kernelshap)
 
 [![](https://cranlogs.r-pkg.org/badges/kernelshap)](https://cran.r-project.org/package=kernelshap) 
@@ -13,34 +13,24 @@
 
 ## Overview
 
-The package contains two workhorses to calculate SHAP values for *any* model:
+The package contains three functions to crunch SHAP values:
 
-- `permshap()`: Exact permutation SHAP algorithm of [1]. Recommended for up to 8-10 features.
-- `kernelshap()`: Kernel SHAP algorithm of [2] and [3]. By default, exact Kernel SHAP is used for up to $p=8$ features, and an almost exact hybrid algorithm otherwise.
+- **`permshap()`**: Permutation SHAP algorithm of [1]. Recommended for models with up to 8 features, or if you don't trust Kernel SHAP. Both exact and sampling versions are available.
+- **`kernelshap()`**: Kernel SHAP algorithm of [2] and [3]. Recommended for models with more than 8 features. Both exact and (pseudo-exact) sampling versions are available.
+- **`additive_shap()`**: For *additive models* fitted via `lm()`, `glm()`, `mgcv::gam()`, `mgcv::bam()`, `gam::gam()`, `survival::coxph()`, or `survival::survreg()`. Exponentially faster than the model-agnostic options above, and recommended if possible.
 
-Furthermore, the function `additive_shap()` produces SHAP values for additive models fitted via `lm()`, `glm()`, `mgcv::gam()`, `mgcv::bam()`, `gam::gam()`,
- `survival::coxph()`, or `survival::survreg()`. It is exponentially faster than `permshap()` and `kernelshap()`, with identical results when the background dataset of the latter equals the full training data.
+To explain your model, select an explanation dataset `X` (up to 1000 rows from the training data, feature columns only) and apply the recommended function. Use {shapviz} to visualize the resulting SHAP values. 
 
-### Kernel SHAP or permutation SHAP?
+**Remarks to `permshap()` and `kernelshap()`**
 
-Kernel SHAP has been introduced in [2] as an approximation of permutation SHAP [1]. For up to ten features, exact calculations are realistic for both algorithms. Since exact Kernel SHAP is still only an approximation of exact permutation SHAP, the latter should be preferred in this case, even if the results are often very similar.
-
-A situation where the two approaches give different results: The model has interactions of order three or higher.
-
-### Typical workflow to explain any model
-
-1. **Sample rows to explain:** Sample 500 to 2000 rows `X` to be explained. If the training dataset is small, simply use the full training data for this purpose. `X` should only contain feature columns.
-2. **Select background data (optional):** Both algorithms require a representative background dataset `bg_X` to calculate marginal means. For this purpose, set aside 50 to 500 rows from the training data. 
-If the training data is small, use the full training data. In cases with a natural "off" value (like MNIST digits), this can also be a single row with all values set to the off value. If not specified, maximum `bg_n = 200` rows are randomly sampled from `X`.
-3. **Crunch:** Use `kernelshap(object, X, bg_X = NULL, ...)` or `permshap(object, X, bg_X = NULL, ...)` to calculate SHAP values. Runtime is proportional to `nrow(X)`, while memory consumption scales linearly in `nrow(bg_X)`.
-4. **Analyze:** Use {shapviz} to visualize the results.
-
-**Remarks**
-
-- Multivariate predictions are handled at no additional computational cost.
-- Case weights are supported via the argument `bg_w`.
-- By changing the defaults in `kernelshap()`, the iterative pure sampling approach in [3] can be enforced.
-- The `additive_shap()` explainer is easier to use: Only the model and `X` are required.
+- Both algorithms need a representative background data `bg_X` to calculate marginal means (up to 500 rows from the training data). In cases with a natural "off" value (like MNIST digits), this can also be a single row with all values set to the off value. If unspecified, 200 rows are randomly sampled from `X`.
+- Exact Kernel SHAP is an approximation to exact permutation SHAP. Since exact calculations are usually sufficiently fast for up to eight features, we recommend `permshap()` in this case. With more features, `kernelshap()` switches to a comparably fast, almost exact algorithm with faster convergence than the sampling version of permutation SHAP.
+  That is why we recommend `kernelshap()` in this case.
+- For models with interactions of order up to two, SHAP values of permutation SHAP and Kernel SHAP agree, 
+and the implemented sampling versions provide the same results as the exact versions.
+In the presence of interactions of order three or higher, this is no longer the case.
+- For additive models, `permshap()` and `kernelshap()` give the same results as `additive_shap` 
+as long as the full training data would be used as background data.
 
 ## Installation
 
@@ -62,9 +52,11 @@ library(ggplot2)
 library(ranger)
 library(shapviz)
 
+options(ranger.num.threads = 8)
+
 diamonds <- transform(
   diamonds,
-  log_price = log(price), 
+  log_price = log(price),
   log_carat = log(carat)
 )
 
@@ -82,12 +74,11 @@ fit  # OOB R-squared 0.989
 set.seed(10)
 X <- diamonds[sample(nrow(diamonds), 1000), xvars]
 
-# 2) Optional: Select background data. If not specified, a random sample of 200 rows
-#    from X is used
+# 2) Optional: Select background data. If unspecified, 200 rows from X are used
 bg_X <- diamonds[sample(nrow(diamonds), 200), ]
 
-# 3) Crunch SHAP values for all 1000 rows of X (54 seconds)
-# Note: Since the number of features is small, we use permshap()
+# 3) Crunch SHAP values (22 seconds)
+# Since the number of features is small, we use permshap()
 system.time(
   ps <- permshap(fit, X, bg_X = bg_X)
 )
@@ -98,16 +89,15 @@ ps
 [1,]  1.1913247  0.09005467 -0.13430720 0.000682593
 [2,] -0.4931989 -0.11724773  0.09868921 0.028563613
 
-# Kernel SHAP gives almost the same:
-system.time(  # 49 s
-  ks <- kernelshap(fit, X, bg_X = bg_X)
-)
+# Kernel SHAP gives very slightly different values because the model contains
+# interations of order > 2:
+ks <- kernelshap(fit, X, bg_X = bg_X)
 ks
 #       log_carat     clarity       color        cut
 # [1,]  1.1911791  0.0900462 -0.13531648 0.001845958
 # [2,] -0.4927482 -0.1168517  0.09815062 0.028255442
 
-# 4) Analyze with our sister package {shapviz}
+# 4) Analyze with {shapviz}
 ps <- shapviz(ps)
 sv_importance(ps)
 sv_dependence(ps, xvars)
@@ -115,17 +105,17 @@ sv_dependence(ps, xvars)
 
 ![](man/figures/README-rf-imp.svg)
 
-![](man/figures/README-rf-dep.svg)
+![](man/figures/README-rf-dep.png)
 
 ## More Examples
 
-{kernelshap} can deal with almost any situation. We will show some of the flexibility here. The first two examples require you to run at least up to Step 2 of the "Basic Usage" code.
+The {kernelshap} package can deal with almost any situation. We will show some of the flexibility here. The first two examples require you to run at least up to Step 2 of the "Basic Usage" code.
 
 ### Parallel computing
 
-Parallel computing is supported via {foreach}. Note that this does not work with all models, and that there is no progress bar. 
+Parallel computing for `permshap()` and `kernelshap()` is supported via {foreach}. Note that this does not work for all models. 
 
-On Windows, sometimes not all packages or global objects are passed to the parallel sessions. Often, this can be fixed via `parallel_args`, see the generalized additive model below. 
+On Windows, sometimes not all packages or global objects are passed to the parallel sessions. Often, this can be fixed via `parallel_args`, see this example: 
 
 ```r
 library(doFuture)
@@ -135,10 +125,13 @@ registerDoFuture()
 plan(multisession, workers = 4)  # Windows
 # plan(multicore, workers = 4)   # Linux, macOS, Solaris
 
+# GAM with interactions - we cannot use additive_shap()
 fit <- gam(log_price ~ s(log_carat) + clarity * color + cut, data = diamonds)
 
-system.time(  # 9 seconds in parallel
-  ps <- permshap(fit, X, parallel = TRUE, parallel_args = list(.packages = "mgcv"))
+system.time(  # 4 seconds in parallel
+  ps <- permshap(
+    fit, X, bg_X = bg_X, parallel = TRUE, parallel_args = list(.packages = "mgcv")
+  )
 )
 ps
 
@@ -148,7 +141,7 @@ ps
 # [2,]  -0.51546 -0.1174766  0.11122775 0.030243973
 
 # Because there are no interactions of order above 2, Kernel SHAP gives the same:
-system.time(  # 27 s non-parallel
+system.time(  # 12 s non-parallel
   ks <- kernelshap(fit, X, bg_X = bg_X)
 )
 all.equal(ps$S, ks$S)
@@ -160,9 +153,9 @@ sv_importance(sv, kind = "bee")
 sv_dependence(sv, xvars)
 ```
 
-![](man/figures/README-gam-imp.svg)
+![](man/figures/README-gam-imp.png)
 
-![](man/figures/README-gam-dep.svg)
+![](man/figures/README-gam-dep.png)
 
 ### Taylored predict()
 
@@ -172,7 +165,7 @@ In this {keras} example, we show how to use a tailored `predict()` function that
 - uses sufficiently large batches, and 
 - turns off the Keras progress bar.
 
-The results are not fully reproducible though.
+(The results are not fully reproducible.)
 
 ```r
 library(keras)
@@ -202,9 +195,9 @@ nn |>
   )
 
 pred_fun <- function(mod, X) 
-  predict(mod, data.matrix(X), batch_size = 1e4, verbose = FALSE)
+  predict(mod, data.matrix(X), batch_size = 1e4, verbose = FALSE, workers = 4)
 
-system.time(  # 60 s
+system.time(  # 42 s
   ps <- permshap(nn, X, bg_X = bg_X, pred_fun = pred_fun)
 )
 
@@ -215,7 +208,7 @@ sv_dependence(ps, xvars)
 
 ![](man/figures/README-nn-imp.svg)
 
-![](man/figures/README-nn-dep.svg)
+![](man/figures/README-nn-dep.png)
 
 ### Additive SHAP
 
@@ -256,7 +249,7 @@ sv_dependence(ps_prob, "Petal.Length")
 
 ![](man/figures/README-prob-imp.svg)
 
-![](man/figures/README-prob-dep.svg)
+![](man/figures/README-prob-dep.png)
 
 ### Meta-learners
 
@@ -284,7 +277,7 @@ iris_wf <- workflow() |>
 fit <- iris_wf |>
   fit(iris)
 
-system.time(  # 4s
+system.time(  # 3s
   ps <- permshap(fit, iris[-5], type = "prob")
 )
 ps

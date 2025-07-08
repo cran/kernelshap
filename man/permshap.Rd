@@ -16,6 +16,10 @@ permshap(object, ...)
   feature_names = colnames(X),
   bg_w = NULL,
   bg_n = 200L,
+  exact = length(feature_names) <= 8L,
+  low_memory = length(feature_names) > 15L,
+  tol = 0.01,
+  max_iter = 10L * length(feature_names),
   parallel = FALSE,
   parallel_args = NULL,
   verbose = TRUE,
@@ -30,6 +34,10 @@ permshap(object, ...)
   feature_names = colnames(X),
   bg_w = NULL,
   bg_n = 200L,
+  exact = length(feature_names) <= 8L,
+  low_memory = length(feature_names) > 15L,
+  tol = 0.01,
+  max_iter = 10L * length(feature_names),
   parallel = FALSE,
   parallel_args = NULL,
   verbose = TRUE,
@@ -68,6 +76,25 @@ If \code{bg_X = NULL}, must be of same length as \code{X}. Set to \code{NULL} fo
 
 \item{bg_n}{If \code{bg_X = NULL}: Size of background data to be sampled from \code{X}.}
 
+\item{exact}{If \code{TRUE}, the algorithm will produce exact SHAP values
+with respect to the background data.
+The default is \code{TRUE} for up to eight features, and \code{FALSE} otherwise.}
+
+\item{low_memory}{If \code{FALSE} (default up to p = 15), the algorithm evaluates p
+predictions together, reducing the number of calls to \code{predict()}.}
+
+\item{tol}{Tolerance determining when to stop. As in CL21, the algorithm keeps
+iterating until \eqn{\textrm{max}(\sigma_n)/(\textrm{max}(\beta_n) - \textrm{min}(\beta_n)) < \textrm{tol}},
+where the \eqn{\beta_n} are the SHAP values of a given observation,
+and \eqn{\sigma_n} their standard errors.
+For multidimensional predictions, the criterion must be satisfied for each
+dimension separately. The stopping criterion uses the fact that standard errors
+and SHAP values are all on the same scale. Ignored if \code{exact = TRUE}.
+For \code{permshap()}, the default is 0.01, while for \code{kernelshap()} it is set to 0.005.}
+
+\item{max_iter}{If the stopping criterion (see \code{tol}) is not reached after
+\code{max_iter} iterations, the algorithm stops. Ignored if \code{exact = TRUE}.}
+
 \item{parallel}{If \code{TRUE}, use parallel \code{\link[foreach:foreach]{foreach::foreach()}} to loop over rows
 to be explained. Must register backend beforehand, e.g., via 'doFuture' package,
 see README for an example. Parallelization automatically disables the progress bar.}
@@ -92,18 +119,50 @@ dimension \eqn{K > 1}, a list of \eqn{K} such matrices.
 background data.
 \item \code{bg_X}: The background data.
 \item \code{bg_w}: The background case weights.
-\item \code{m_exact}: Integer providing the effective number of exact on-off vectors used.
-\item \code{exact}: Logical flag indicating whether calculations are exact or not
-(currently \code{TRUE}).
+\item \code{m_exact}: Number of on-off vectors evaluated once per row of \code{X}.
+\item \code{exact}: Logical flag indicating whether calculations are exact or not.
 \item \code{txt}: Summary text.
 \item \code{predictions}: \eqn{(n \times K)} matrix with predictions of \code{X}.
 \item \code{algorithm}: "permshap".
+\item \code{m}: Number of sampled on-off vectors evaluated per iteration (if not exact).
+\item \code{SE}: Standard errors corresponding to \code{S} (if not exact).
+\item \code{n_iter}: Integer vector of length n providing the number of iterations
+per row of \code{X} (if not exact).
+\item \code{converged}: Logical vector of length n indicating convergence per row of \code{X}
+(if not exact).
 }
 }
 \description{
-Exact permutation SHAP algorithm with respect to a background dataset,
-see Strumbelj and Kononenko. The function works for up to 14 features.
-For eight or more features, we recomment to switch to \code{\link[=kernelshap]{kernelshap()}}.
+Permutation SHAP algorithm with respect to a background dataset,
+see Strumbelj and Kononenko (2014) for the basic idea.
+
+By default, for up to p=8 features, exact SHAP values are returned
+(exact with respect to the selected background data).
+
+Otherwise, the sampling process iterates until the resulting values
+are sufficiently precise, and standard errors are provided.
+
+During each iteration, the algorithm cycles twice through a random permutation:
+It starts with all feature components "turned on" (i.e., taking them
+from the observation to be explained), then gradually turning off components
+according to the permutation (i.e., marginalizing them over the background data).
+When all components are turned off, the algorithm - one by one - turns the components
+back on, until all components are turned on again. This antithetic scheme allows to
+evaluate Shapley's formula 2p times with each permutation, using a total of
+2p + 1 evaluations of marginal means.
+
+For models with interactions up to order two, one can show that
+even a single iteration provides exact SHAP values (with respect to the
+given background dataset).
+
+The Python implementation "shap" uses a similar approach, but without
+providing standard errors, and without early stopping. To mimic its behavior,
+we would need to set \code{max_iter = p} in R, and \code{max_eval = (2*p+1)*p} in Python.
+
+For faster convergence, we use balanced permutations in the sense that
+p subsequent permutations each start with a different feature.
+Furthermore, the 2p on-off vectors with sum <=1 or >=p-1 are evaluated only once,
+similar to the degree 1 hybrid in \code{\link[=kernelshap]{kernelshap()}} (but covering less weight).
 }
 \section{Methods (by class)}{
 \itemize{

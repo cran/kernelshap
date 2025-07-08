@@ -18,7 +18,6 @@ kernelshap(object, ...)
   bg_n = 200L,
   exact = length(feature_names) <= 8L,
   hybrid_degree = 1L + length(feature_names) \%in\% 4:16,
-  paired_sampling = TRUE,
   m = 2L * length(feature_names) * (1L + 3L * (hybrid_degree == 0L)),
   tol = 0.005,
   max_iter = 100L,
@@ -38,7 +37,6 @@ kernelshap(object, ...)
   bg_n = 200L,
   exact = length(feature_names) <= 8L,
   hybrid_degree = 1L + length(feature_names) \%in\% 4:16,
-  paired_sampling = TRUE,
   m = 2L * length(feature_names) * (1L + 3L * (hybrid_degree == 0L)),
   tol = 0.005,
   max_iter = 100L,
@@ -81,9 +79,8 @@ If \code{bg_X = NULL}, must be of same length as \code{X}. Set to \code{NULL} fo
 \item{bg_n}{If \code{bg_X = NULL}: Size of background data to be sampled from \code{X}.}
 
 \item{exact}{If \code{TRUE}, the algorithm will produce exact Kernel SHAP values
-with respect to the background data. In this case, the arguments \code{hybrid_degree},
-\code{m}, \code{paired_sampling}, \code{tol}, and \code{max_iter} are ignored.
-The default is \code{TRUE} up to eight features, and \code{FALSE} otherwise.}
+with respect to the background data.
+The default is \code{TRUE} for up to eight features, and \code{FALSE} otherwise.}
 
 \item{hybrid_degree}{Integer controlling the exactness of the hybrid strategy. For
 \eqn{4 \le p \le 16}, the default is 2, otherwise it is 1.
@@ -103,23 +100,18 @@ Convergence usually happens in the minimal possible number of iterations of two.
 \eqn{\sum z \in \{1, \dots, k, p-k, \dots, p-1\}}.
 }}
 
-\item{paired_sampling}{Logical flag indicating whether to do the sampling in a paired
-manner. This means that with every on-off vector \eqn{z}, also \eqn{1-z} is
-considered. CL21 shows its superiority compared to standard sampling, therefore the
-default (\code{TRUE}) should usually not be changed except for studying properties
-of Kernel SHAP algorithms. Ignored if \code{exact = TRUE}.}
-
 \item{m}{Even number of on-off vectors sampled during one iteration.
 The default is \eqn{2p}, except when \code{hybrid_degree == 0}.
 Then it is set to \eqn{8p}. Ignored if \code{exact = TRUE}.}
 
-\item{tol}{Tolerance determining when to stop. Following CL21, the algorithm keeps
+\item{tol}{Tolerance determining when to stop. As in CL21, the algorithm keeps
 iterating until \eqn{\textrm{max}(\sigma_n)/(\textrm{max}(\beta_n) - \textrm{min}(\beta_n)) < \textrm{tol}},
 where the \eqn{\beta_n} are the SHAP values of a given observation,
 and \eqn{\sigma_n} their standard errors.
 For multidimensional predictions, the criterion must be satisfied for each
 dimension separately. The stopping criterion uses the fact that standard errors
-and SHAP values are all on the same scale. Ignored if \code{exact = TRUE}.}
+and SHAP values are all on the same scale. Ignored if \code{exact = TRUE}.
+For \code{permshap()}, the default is 0.01, while for \code{kernelshap()} it is set to 0.005.}
 
 \item{max_iter}{If the stopping criterion (see \code{tol}) is not reached after
 \code{max_iter} iterations, the algorithm stops. Ignored if \code{exact = TRUE}.}
@@ -148,32 +140,36 @@ dimension \eqn{K > 1}, a list of \eqn{K} such matrices.
 background data.
 \item \code{bg_X}: The background data.
 \item \code{bg_w}: The background case weights.
-\item \code{SE}: Standard errors corresponding to \code{S} (and organized like \code{S}).
-\item \code{n_iter}: Integer vector of length n providing the number of iterations
-per row of \code{X}.
-\item \code{converged}: Logical vector of length n indicating convergence per row of \code{X}.
-\item \code{m}: Integer providing the effective number of sampled on-off vectors used
-per iteration.
-\item \code{m_exact}: Integer providing the effective number of exact on-off vectors used
-per iteration.
+\item \code{m_exact}: Number of on-off vectors evaluated for exact calculations.
 \item \code{prop_exact}: Proportion of the Kernel SHAP weight distribution covered by
 exact calculations.
 \item \code{exact}: Logical flag indicating whether calculations are exact or not.
 \item \code{txt}: Summary text.
 \item \code{predictions}: \eqn{(n \times K)} matrix with predictions of \code{X}.
 \item \code{algorithm}: "kernelshap".
+\item \code{m}: Number of sampled on-off vectors evaluated per iteration (if not exact).
+\item \code{SE}: Standard errors corresponding to \code{S} (if not exact).
+\item \code{n_iter}: Integer vector of length n providing the number of iterations
+per row of \code{X} (if not exact).
+\item \code{converged}: Logical vector of length n indicating convergence per row of \code{X}
+(if not exact).
 }
 }
 \description{
 Efficient implementation of Kernel SHAP, see Lundberg and Lee (2017), and
 Covert and Lee (2021), abbreviated by CL21.
-For up to \eqn{p=8} features, the resulting Kernel SHAP values are exact regarding
-the selected background data. For larger \eqn{p}, an almost exact
-hybrid algorithm involving iterative sampling is used, see Details.
-For up to eight features, however, we recomment to use \code{\link[=permshap]{permshap()}}.
+By default, for up to p=8 features, exact Kernel SHAP values are returned
+(with respect to the selected background data).
+Otherwise, an almost exact hybrid algorithm combining exact calculations and
+iterative paired sampling is used, see Details.
+
+Note that (exact) Kernel SHAP is only an approximation of (exact) permutation SHAP.
+Thus, for up to eight features, we recommend \code{\link[=permshap]{permshap()}}. For more features,
+\code{\link[=permshap]{permshap()}} tends to be inefficient compared the optimized hybrid strategy
+of Kernel SHAP.
 }
 \details{
-Pure iterative Kernel SHAP sampling as in Covert and Lee (2021) works like this:
+The pure iterative Kernel SHAP sampling as in Covert and Lee (2021) works like this:
 \enumerate{
 \item A binary "on-off" vector \eqn{z} is drawn from \eqn{\{0, 1\}^p}
 such that its sum follows the SHAP Kernel weight distribution
@@ -210,7 +206,7 @@ a step further to a degree 2 hybrid by adding all \eqn{p(p-1)} vectors with
 \eqn{\sum z \in \{2, p-2\}} to the process etc. The necessary predictions are
 obtained along with other calculations similar to those described in CL21.
 \item Step 2 (sampling part): The remaining weight is filled by sampling vectors z
-according to Kernel SHAP weights renormalized to the values not yet covered by Step 1.
+according to Kernel SHAP weights normalized to the values not yet covered by Step 1.
 Together with the results from Step 1 - correctly weighted - this now forms a
 complete iteration as in CL21. The difference is that most mass is covered by exact
 calculations. Afterwards, the algorithm iterates until convergence.
@@ -223,8 +219,8 @@ evaluated. In this case, no sampling is required and the algorithm returns exact
 Kernel SHAP values with respect to the given background data.
 Since \code{\link[=kernelshap]{kernelshap()}} calculates predictions on data with \eqn{MN} rows
 (\eqn{N} is the background data size and \eqn{M} the number of \eqn{z} vectors), \eqn{p}
-should not be much higher than 10 for exact calculations.
-For similar reasons, degree 2 hybrids should not use \eqn{p} much larger than 40.
+should not be higher than 10 for exact calculations.
+For similar reasons, degree 2 hybrids should not use \eqn{p} larger than 40.
 }
 \section{Methods (by class)}{
 \itemize{
