@@ -6,37 +6,35 @@
 #'
 #' By default, for up to p=8 features, exact SHAP values are returned
 #' (exact with respect to the selected background data).
-#'
 #' Otherwise, the sampling process iterates until the resulting values
 #' are sufficiently precise, and standard errors are provided.
 #'
+#' @details
 #' During each iteration, the algorithm cycles twice through a random permutation:
 #' It starts with all feature components "turned on" (i.e., taking them
 #' from the observation to be explained), then gradually turning off components
-#' according to the permutation (i.e., marginalizing them over the background data).
+#' according to the permutation.
 #' When all components are turned off, the algorithm - one by one - turns the components
 #' back on, until all components are turned on again. This antithetic scheme allows to
-#' evaluate Shapley's formula 2p times with each permutation, using a total of
-#' 2p + 1 evaluations of marginal means.
+#' evaluate Shapley's formula twice per feature using a single permutation and a total
+#' of 2p disjoint evaluations of the contribution function.
 #'
 #' For models with interactions up to order two, one can show that
-#' even a single iteration provides exact SHAP values (with respect to the
-#' given background dataset).
+#' even a single iteration provides exact SHAP values for all features
+#' (with respect to the given background dataset).
 #'
 #' The Python implementation "shap" uses a similar approach, but without
-#' providing standard errors, and without early stopping. To mimic its behavior,
-#' we would need to set `max_iter = p` in R, and `max_eval = (2*p+1)*p` in Python.
+#' providing standard errors, and without early stopping.
 #'
 #' For faster convergence, we use balanced permutations in the sense that
 #' p subsequent permutations each start with a different feature.
 #' Furthermore, the 2p on-off vectors with sum <=1 or >=p-1 are evaluated only once,
-#' similar to the degree 1 hybrid in [kernelshap()] (but covering less weight).
+#' similar to the degree 1 hybrid in [kernelshap()].
 #'
-#' @param exact If `TRUE`, the algorithm will produce exact SHAP values
-#'   with respect to the background data.
-#'   The default is `TRUE` for up to eight features, and `FALSE` otherwise.
-#' @param low_memory If `FALSE` (default up to p = 15), the algorithm evaluates p
-#'   predictions together, reducing the number of calls to `predict()`.
+#' @param low_memory If `FALSE` (default up to p = 15), the algorithm does p
+#'   iterations in one chunk, evaluating Shapley's formula 2p^2 times.
+#'   For models with interactions up to order two, you can set this to `TRUE`
+#'   to save time.
 #' @inheritParams kernelshap
 #' @returns
 #'   An object of class "kernelshap" with the following components:
@@ -108,6 +106,7 @@ permshap.default <- function(
     parallel = FALSE,
     parallel_args = NULL,
     verbose = TRUE,
+    seed = NULL,
     ...) {
   p <- length(feature_names)
   if (p <= 1L) {
@@ -132,26 +131,25 @@ permshap.default <- function(
   bg_n <- nrow(bg_X)
   n <- nrow(X)
 
+  if (!is.null(seed)) {
+    set.seed(seed)
+  }
+
   # Baseline and predictions on explanation data
   bg_preds <- align_pred(pred_fun(object, bg_X, ...))
   v0 <- wcolMeans(bg_preds, w = bg_w) # Average pred of bg data: 1 x K
   v1 <- align_pred(pred_fun(object, X, ...)) # Predictions on X:        n x K
 
-  # Drop unnecessary columns in bg_X. If X is matrix, also column order is relevant
-  # Predictions will never be applied directly to bg_X anymore
-  if (!identical(colnames(bg_X), feature_names)) {
-    bg_X <- bg_X[, feature_names, drop = FALSE]
-  }
-
   # Pre-calculations that are identical for each row to be explained
   if (exact) {
-    Z <- exact_Z(p, feature_names = feature_names, keep_extremes = TRUE)
+    Z <- exact_Z(p, feature_names = feature_names)
     m_exact <- nrow(Z) - 2L # We won't evaluate vz for first and last row
     m_eval <- 0L # for consistency with sampling case
     precalc <- list(
       Z = Z,
-      Z_code = rowpaste(Z),
-      bg_X_rep = rep_rows(bg_X, rep.int(seq_len(bg_n), m_exact))
+      bg_X_rep = rep_rows(bg_X, rep.int(seq_len(bg_n), m_exact)),
+      positions = positions_for_exact(Z),
+      shapley_w = shapley_weights(p, ell = rowSums(Z) - 1) # how many other players?
     )
   } else {
     max_iter <- as.integer(ceiling(max_iter / p) * p) # should be multiple of p
@@ -171,8 +169,9 @@ permshap.default <- function(
 
   # Apply permutation SHAP to each row of X
   if (isTRUE(parallel)) {
-    parallel_args <- c(list(i = seq_len(n)), parallel_args)
-    res <- do.call(foreach::foreach, parallel_args) %dopar% permshap_one(
+    future_args <- c(list(seed = TRUE), parallel_args)
+    parallel_args <- c(list(i = seq_len(n)), list(.options.future = future_args))
+    res <- do.call(foreach::foreach, parallel_args) %dofuture% permshap_one(
       x = X[i, , drop = FALSE],
       v1 = v1[i, , drop = FALSE],
       object = object,
@@ -262,6 +261,7 @@ permshap.ranger <- function(
     parallel = FALSE,
     parallel_args = NULL,
     verbose = TRUE,
+    seed = NULL,
     survival = c("chf", "prob"),
     ...) {
   if (is.null(pred_fun)) {
@@ -283,6 +283,7 @@ permshap.ranger <- function(
     parallel = parallel,
     parallel_args = parallel_args,
     verbose = verbose,
+    seed = seed,
     ...
   )
 }

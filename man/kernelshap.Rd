@@ -24,6 +24,7 @@ kernelshap(object, ...)
   parallel = FALSE,
   parallel_args = NULL,
   verbose = TRUE,
+  seed = NULL,
   ...
 )
 
@@ -43,6 +44,7 @@ kernelshap(object, ...)
   parallel = FALSE,
   parallel_args = NULL,
   verbose = TRUE,
+  seed = NULL,
   survival = c("chf", "prob"),
   ...
 )
@@ -70,15 +72,14 @@ Additional (named) arguments are passed via \code{...}.
 The default, \code{\link[stats:predict]{stats::predict()}}, will work in most cases.}
 
 \item{feature_names}{Optional vector of column names in \code{X} used to calculate
-SHAP values. By default, this equals \code{colnames(X)}. Not supported if \code{X}
-is a matrix.}
+SHAP values. By default, this equals \code{colnames(X)}.}
 
 \item{bg_w}{Optional vector of case weights for each row of \code{bg_X}.
 If \code{bg_X = NULL}, must be of same length as \code{X}. Set to \code{NULL} for no weights.}
 
 \item{bg_n}{If \code{bg_X = NULL}: Size of background data to be sampled from \code{X}.}
 
-\item{exact}{If \code{TRUE}, the algorithm will produce exact Kernel SHAP values
+\item{exact}{If \code{TRUE}, the algorithm will produce exact SHAP values
 with respect to the background data.
 The default is \code{TRUE} for up to eight features, and \code{FALSE} otherwise.}
 
@@ -90,12 +91,10 @@ Ignored if \code{exact = TRUE}.
 worse than the hybrid strategy and should therefore only be used for
 studying properties of the Kernel SHAP algorithm.
 \item \code{1}: Uses all \eqn{2p} on-off vectors \eqn{z} with \eqn{\sum z \in \{1, p-1\}}
-for the exact part, which covers at least 75\% of the mass of the Kernel weight
-distribution. The remaining mass is covered by random sampling.
+for the exact part. The remaining mass is covered by random sampling.
 \item \code{2}: Uses all \eqn{p(p+1)} on-off vectors \eqn{z} with
-\eqn{\sum z \in \{1, 2, p-2, p-1\}}. This covers at least 92\% of the mass of the
-Kernel weight distribution. The remaining mass is covered by sampling.
-Convergence usually happens in the minimal possible number of iterations of two.
+\eqn{\sum z \in \{1, 2, p-2, p-1\}}. The remaining mass is covered by sampling.
+Usually converges fast.
 \item \code{k>2}: Uses all on-off vectors with
 \eqn{\sum z \in \{1, \dots, k, p-k, \dots, p-1\}}.
 }}
@@ -116,16 +115,21 @@ For \code{permshap()}, the default is 0.01, while for \code{kernelshap()} it is 
 \item{max_iter}{If the stopping criterion (see \code{tol}) is not reached after
 \code{max_iter} iterations, the algorithm stops. Ignored if \code{exact = TRUE}.}
 
-\item{parallel}{If \code{TRUE}, use parallel \code{\link[foreach:foreach]{foreach::foreach()}} to loop over rows
-to be explained. Must register backend beforehand, e.g., via 'doFuture' package,
-see README for an example. Parallelization automatically disables the progress bar.}
+\item{parallel}{If \code{TRUE}, use \code{\link[foreach:foreach]{foreach::foreach()}} and \verb{\%dofuture\%} to loop over rows
+to be explained. Must register backend beforehand, e.g., \code{plan(multisession)},
+see README for an example. Currently disables the progress bar.}
 
-\item{parallel_args}{Named list of arguments passed to \code{\link[foreach:foreach]{foreach::foreach()}}.
-Ideally, this is \code{NULL} (default). Only relevant if \code{parallel = TRUE}.
+\item{parallel_args}{Named list of arguments passed to
+\code{foreach::foreach(.options.future = ...)}, ideally \code{NULL} (default).
+Only relevant if \code{parallel = TRUE}.
 Example on Windows: if \code{object} is a GAM fitted with package 'mgcv',
-then one might need to set \code{parallel_args = list(.packages = "mgcv")}.}
+then one might need to set \code{parallel_args = list(packages = "mgcv")}.
+Similarly, if the model has been fitted with \code{ranger()}, then it might be necessary
+to pass \code{parallel_args = list(packages = "ranger")}.}
 
 \item{verbose}{Set to \code{FALSE} to suppress messages and the progress bar.}
+
+\item{seed}{Optional integer random seed. Note that it changes the global seed.}
 
 \item{survival}{Should cumulative hazards ("chf", default) or survival
 probabilities ("prob") per time be predicted? Only in \code{ranger()} survival models.}
@@ -158,22 +162,16 @@ per row of \code{X} (if not exact).
 \description{
 Efficient implementation of Kernel SHAP, see Lundberg and Lee (2017), and
 Covert and Lee (2021), abbreviated by CL21.
-By default, for up to p=8 features, exact Kernel SHAP values are returned
+By default, for up to p=8 features, exact SHAP values are returned
 (with respect to the selected background data).
-Otherwise, an almost exact hybrid algorithm combining exact calculations and
+Otherwise, a partly exact hybrid algorithm combining exact calculations and
 iterative paired sampling is used, see Details.
-
-Note that (exact) Kernel SHAP is only an approximation of (exact) permutation SHAP.
-Thus, for up to eight features, we recommend \code{\link[=permshap]{permshap()}}. For more features,
-\code{\link[=permshap]{permshap()}} tends to be inefficient compared the optimized hybrid strategy
-of Kernel SHAP.
 }
 \details{
 The pure iterative Kernel SHAP sampling as in Covert and Lee (2021) works like this:
 \enumerate{
-\item A binary "on-off" vector \eqn{z} is drawn from \eqn{\{0, 1\}^p}
-such that its sum follows the SHAP Kernel weight distribution
-(normalized to the range \eqn{\{1, \dots, p-1\}}).
+\item A binary "on-off" vector \eqn{z} is drawn from \eqn{\{0, 1\}^p} according to
+a special weighting logic.
 \item For each \eqn{j} with \eqn{z_j = 1}, the \eqn{j}-th column of the
 original background data is replaced by the corresponding feature value \eqn{x_j}
 of the observation to be explained.
@@ -189,18 +187,14 @@ observation to be explained. The resulting coefficients are the Kernel SHAP valu
 
 This is repeated multiple times until convergence, see CL21 for details.
 
-A drawback of this strategy is that many (at least 75\%) of the \eqn{z} vectors will
-have \eqn{\sum z \in \{1, p-1\}}, producing many duplicates. Similarly, at least 92\%
-of the mass will be used for the \eqn{p(p+1)} possible vectors with
-\eqn{\sum z \in \{1, 2, p-2, p-1\}}.
-This inefficiency can be fixed by a hybrid strategy, combining exact calculations
-with sampling.
+To avoid the re-evaluation of identical coalition vectors, we have implemented
+a hybrid strategy, combining exact calculations with sampling.
 
 The hybrid algorithm has two steps:
 \enumerate{
 \item Step 1 (exact part): There are \eqn{2p} different on-off vectors \eqn{z} with
-\eqn{\sum z \in \{1, p-1\}}, covering a large proportion of the Kernel SHAP
-distribution. The degree 1 hybrid will list those vectors and use them according
+\eqn{\sum z \in \{1, p-1\}}.
+The degree 1 hybrid will list those vectors and use them according
 to their weights in the upcoming calculations. Depending on \eqn{p}, we can also go
 a step further to a degree 2 hybrid by adding all \eqn{p(p-1)} vectors with
 \eqn{\sum z \in \{2, p-2\}} to the process etc. The necessary predictions are
@@ -208,10 +202,9 @@ obtained along with other calculations similar to those described in CL21.
 \item Step 2 (sampling part): The remaining weight is filled by sampling vectors z
 according to Kernel SHAP weights normalized to the values not yet covered by Step 1.
 Together with the results from Step 1 - correctly weighted - this now forms a
-complete iteration as in CL21. The difference is that most mass is covered by exact
-calculations. Afterwards, the algorithm iterates until convergence.
-The output of Step 1 is reused in every iteration, leading to an extremely
-efficient strategy.
+complete iteration as in CL21. The difference is that a significant part of the mass
+is covered by exact calculations. Afterwards, the algorithm iterates until
+convergence. The output of Step 1 is reused in every iteration.
 }
 
 If \eqn{p} is sufficiently small, all possible \eqn{2^p-2} on-off vectors \eqn{z} can be

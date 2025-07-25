@@ -40,55 +40,62 @@ wcolMeans <- function(x, w = NULL, ...) {
 #' All on-off Vectors
 #'
 #' Internal function that creates matrix of all on-off vectors of length `p`.
+#' Faster than as.matrix(do.call(expand.grid, replicate(p, 0:1, simplify = FALSE)))[, p:1]
+#' Note that we currently do not return a logical matrix because it goes into
+#' matrix multiplications in `kernelshap()`.
 #'
 #' @noRd
 #' @keywords internal
 #'
 #' @param p Number of features.
 #' @param feature_names Feature names.
-#' @param keep_extremes Should extremes be kept? Defaults to `FALSE` (for kernelshap).
-#' @returns An integer matrix of all on-off vectors of length `p`.
-exact_Z <- function(p, feature_names, keep_extremes = FALSE) {
-  Z <- as.matrix(do.call(expand.grid, replicate(p, 0:1, simplify = FALSE)))
+#' @returns An logical matrix of all on-off vectors of length `p`.
+exact_Z <- function(p, feature_names) {
+  if (p < 2L) {
+    stop("p must be at least 2 if exact = TRUE.")
+  }
+  m <- 2^p
+  M <- seq_len(m) - 1L
+  encoded <- as.logical(intToBits(M))
+  dim(encoded) <- c(32L, m)
+  Z <- t(encoded[p:1L, , drop = FALSE])
   colnames(Z) <- feature_names
-  if (keep_extremes) Z else Z[2:(nrow(Z) - 1L), , drop = FALSE]
+  return(Z)
 }
 
-#' Masker
+#' Masked Predict
 #'
 #' Internal function.
 #' For each on-off vector (rows in `Z`), the (weighted) average prediction is returned.
-#' In Python, this function is called "masker", and Z is the "mask".
 #'
 #' @noRd
 #' @keywords internal
 #'
 #' @inheritParams kernelshap
-#' @param X Row to be explained stacked m*n_bg times.
+#' @param x Row to be explained.
 #' @param bg Background data stacked m times.
-#' @param Z A (m x p) matrix with on-off values.
+#' @param Z A logical (m x p) matrix with on-off values.
 #' @param w A vector with case weights (of the same length as the unstacked
 #'   background data).
 #' @returns A (m x K) matrix with vz values.
-get_vz <- function(X, bg, Z, object, pred_fun, w, ...) {
+get_vz <- function(x, bg, Z, object, pred_fun, w, ...) {
   m <- nrow(Z)
-  not_Z <- !Z
   n_bg <- nrow(bg) / m # because bg was replicated m times
 
-  # Replicate not_Z, so that X, bg, not_Z are all of dimension (m*n_bg x p)
+  # Replicate Z, so that bg and Z are of dimension (m*n_bg x p)
   g <- rep_each(m, each = n_bg)
-  not_Z <- not_Z[g, , drop = FALSE]
+  Z_rep <- Z[g, , drop = FALSE]
 
-  if (is.matrix(X)) {
-    # Remember that columns of X and bg are perfectly aligned in this case
-    X[not_Z] <- bg[not_Z]
-  } else {
-    for (v in colnames(Z)) {
-      s <- not_Z[, v]
-      X[[v]][s] <- bg[[v]][s]
+  for (v in colnames(Z)) {
+    s <- Z_rep[, v]
+    if (is.matrix(x)) {
+      bg[s, v] <- x[, v]
+    } else {
+      bg[[v]][s] <- x[[v]]
     }
   }
-  preds <- align_pred(pred_fun(object, X, ...))
+
+  preds <- align_pred(pred_fun(object, bg, ...))
 
   # Aggregate (distinguishing fast 1-dim case)
   if (ncol(preds) == 1L) {
@@ -322,8 +329,6 @@ basic_checks <- function(X, feature_names, pred_fun) {
     dim(X) >= 1L,
     length(feature_names) >= 1L,
     all(feature_names %in% colnames(X)),
-    "If X is a matrix, feature_names must equal colnames(X)" =
-      !is.matrix(X) || identical(colnames(X), feature_names),
     is.function(pred_fun)
   )
   TRUE

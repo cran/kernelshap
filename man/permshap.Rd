@@ -23,6 +23,7 @@ permshap(object, ...)
   parallel = FALSE,
   parallel_args = NULL,
   verbose = TRUE,
+  seed = NULL,
   ...
 )
 
@@ -41,6 +42,7 @@ permshap(object, ...)
   parallel = FALSE,
   parallel_args = NULL,
   verbose = TRUE,
+  seed = NULL,
   survival = c("chf", "prob"),
   ...
 )
@@ -68,8 +70,7 @@ Additional (named) arguments are passed via \code{...}.
 The default, \code{\link[stats:predict]{stats::predict()}}, will work in most cases.}
 
 \item{feature_names}{Optional vector of column names in \code{X} used to calculate
-SHAP values. By default, this equals \code{colnames(X)}. Not supported if \code{X}
-is a matrix.}
+SHAP values. By default, this equals \code{colnames(X)}.}
 
 \item{bg_w}{Optional vector of case weights for each row of \code{bg_X}.
 If \code{bg_X = NULL}, must be of same length as \code{X}. Set to \code{NULL} for no weights.}
@@ -80,8 +81,10 @@ If \code{bg_X = NULL}, must be of same length as \code{X}. Set to \code{NULL} fo
 with respect to the background data.
 The default is \code{TRUE} for up to eight features, and \code{FALSE} otherwise.}
 
-\item{low_memory}{If \code{FALSE} (default up to p = 15), the algorithm evaluates p
-predictions together, reducing the number of calls to \code{predict()}.}
+\item{low_memory}{If \code{FALSE} (default up to p = 15), the algorithm does p
+iterations in one chunk, evaluating Shapley's formula 2p^2 times.
+For models with interactions up to order two, you can set this to \code{TRUE}
+to save time.}
 
 \item{tol}{Tolerance determining when to stop. As in CL21, the algorithm keeps
 iterating until \eqn{\textrm{max}(\sigma_n)/(\textrm{max}(\beta_n) - \textrm{min}(\beta_n)) < \textrm{tol}},
@@ -95,16 +98,21 @@ For \code{permshap()}, the default is 0.01, while for \code{kernelshap()} it is 
 \item{max_iter}{If the stopping criterion (see \code{tol}) is not reached after
 \code{max_iter} iterations, the algorithm stops. Ignored if \code{exact = TRUE}.}
 
-\item{parallel}{If \code{TRUE}, use parallel \code{\link[foreach:foreach]{foreach::foreach()}} to loop over rows
-to be explained. Must register backend beforehand, e.g., via 'doFuture' package,
-see README for an example. Parallelization automatically disables the progress bar.}
+\item{parallel}{If \code{TRUE}, use \code{\link[foreach:foreach]{foreach::foreach()}} and \verb{\%dofuture\%} to loop over rows
+to be explained. Must register backend beforehand, e.g., \code{plan(multisession)},
+see README for an example. Currently disables the progress bar.}
 
-\item{parallel_args}{Named list of arguments passed to \code{\link[foreach:foreach]{foreach::foreach()}}.
-Ideally, this is \code{NULL} (default). Only relevant if \code{parallel = TRUE}.
+\item{parallel_args}{Named list of arguments passed to
+\code{foreach::foreach(.options.future = ...)}, ideally \code{NULL} (default).
+Only relevant if \code{parallel = TRUE}.
 Example on Windows: if \code{object} is a GAM fitted with package 'mgcv',
-then one might need to set \code{parallel_args = list(.packages = "mgcv")}.}
+then one might need to set \code{parallel_args = list(packages = "mgcv")}.
+Similarly, if the model has been fitted with \code{ranger()}, then it might be necessary
+to pass \code{parallel_args = list(packages = "ranger")}.}
 
 \item{verbose}{Set to \code{FALSE} to suppress messages and the progress bar.}
+
+\item{seed}{Optional integer random seed. Note that it changes the global seed.}
 
 \item{survival}{Should cumulative hazards ("chf", default) or survival
 probabilities ("prob") per time be predicted? Only in \code{ranger()} survival models.}
@@ -138,31 +146,30 @@ see Strumbelj and Kononenko (2014) for the basic idea.
 
 By default, for up to p=8 features, exact SHAP values are returned
 (exact with respect to the selected background data).
-
 Otherwise, the sampling process iterates until the resulting values
 are sufficiently precise, and standard errors are provided.
-
+}
+\details{
 During each iteration, the algorithm cycles twice through a random permutation:
 It starts with all feature components "turned on" (i.e., taking them
 from the observation to be explained), then gradually turning off components
-according to the permutation (i.e., marginalizing them over the background data).
+according to the permutation.
 When all components are turned off, the algorithm - one by one - turns the components
 back on, until all components are turned on again. This antithetic scheme allows to
-evaluate Shapley's formula 2p times with each permutation, using a total of
-2p + 1 evaluations of marginal means.
+evaluate Shapley's formula twice per feature using a single permutation and a total
+of 2p disjoint evaluations of the contribution function.
 
 For models with interactions up to order two, one can show that
-even a single iteration provides exact SHAP values (with respect to the
-given background dataset).
+even a single iteration provides exact SHAP values for all features
+(with respect to the given background dataset).
 
 The Python implementation "shap" uses a similar approach, but without
-providing standard errors, and without early stopping. To mimic its behavior,
-we would need to set \code{max_iter = p} in R, and \code{max_eval = (2*p+1)*p} in Python.
+providing standard errors, and without early stopping.
 
 For faster convergence, we use balanced permutations in the sense that
 p subsequent permutations each start with a different feature.
 Furthermore, the 2p on-off vectors with sum <=1 or >=p-1 are evaluated only once,
-similar to the degree 1 hybrid in \code{\link[=kernelshap]{kernelshap()}} (but covering less weight).
+similar to the degree 1 hybrid in \code{\link[=kernelshap]{kernelshap()}}.
 }
 \section{Methods (by class)}{
 \itemize{

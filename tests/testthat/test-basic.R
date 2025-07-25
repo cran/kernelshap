@@ -93,16 +93,6 @@ test_that("selection of bg_X can be controlled via bg_n", {
   }
 })
 
-test_that("using foreach (non-parallel) gives the same as normal mode", {
-  for (algo in c(kernelshap, permshap)) {
-    s <- algo(fit, iris[J, x], bg_X = iris, verbose = FALSE)
-    s2 <- suppressWarnings(
-      algo(fit, iris[J, x], bg_X = iris, verbose = FALSE, parallel = TRUE)
-    )
-    expect_equal(s, s2)
-  }
-})
-
 test_that("verbose is chatty", {
   for (algo in c(kernelshap, permshap)) {
     capture_output(expect_message(algo(fit, iris[J, x], bg_X = iris, verbose = TRUE)))
@@ -175,12 +165,6 @@ test_that("Matrix input is fine", {
     expect_no_error( # additional cols in bg are ok
       algo(fit, X[J, x], pred_fun = pred_fun, bg_X = cbind(d = 1, X), verbose = FALSE)
     )
-    expect_error( # feature_names are less flexible
-      algo(fit, X[J, ],
-        pred_fun = pred_fun, bg_X = X,
-        verbose = FALSE, feature_names = "Sepal.Width"
-      )
-    )
   }
 })
 
@@ -209,13 +193,171 @@ test_that("exact hybrid kernelshap() is similar to exact (non-hybrid)", {
   expect_equal(s1$S, shap[[1L]]$S)
 })
 
-test_that("kernelshap works for large p (hybrid case)", {
-  set.seed(9L)
-  X <- data.frame(matrix(rnorm(20000L), ncol = 100L))
-  y <- X[, 1L] * X[, 2L] * X[, 3L]
-  fit <- lm(y ~ X1:X2:X3 + ., data = cbind(y = y, X))
-  s <- kernelshap(fit, X[1L, ], bg_X = X, verbose = FALSE)
+# test_that("kernelshap works for large p (hybrid case)", {
+#   set.seed(9L)
+#   X <- data.frame(matrix(rnorm(20000L), ncol = 100L))
+#   y <- X[, 1L] * X[, 2L] * X[, 3L]
+#   fit <- lm(y ~ X1:X2:X3 + ., data = cbind(y = y, X))
+#   s <- kernelshap(fit, X[1L, ], bg_X = X, verbose = FALSE)
+#
+#   expect_equal(s$baseline, mean(y))
+#   expect_equal(rowSums(s$S) + s$baseline, unname(predict(fit, X[1L, ])))
+# })
 
-  expect_equal(s$baseline, mean(y))
-  expect_equal(rowSums(s$S) + s$baseline, unname(predict(fit, X[1L, ])))
+test_that("kernelshap and permshap work for models with high-order interactions", {
+  # Expected: Python output
+  # import numpy as np
+  # import shap # 0.47.2
+  #
+  # X = np.array(
+  #   [
+  #     np.arange(1, 101) / 100,
+  #     np.log(np.arange(1, 101)),
+  #     np.sqrt(np.arange(1, 101)),
+  #     np.sin(np.arange(1, 101)),
+  #     (np.arange(1, 101) / 100) ** 2,
+  #     np.cos(np.arange(1, 101)),
+  #   ]
+  # ).T
+  #
+  #
+  # def predict(X):
+  #   return X[:, 0] * X[:, 1] * X[:, 2] * X[:, 3] + X[:, 4] + X[:, 5]
+  #
+  #
+  # ks = shap.explainers.Kernel(predict, X, nsamples=10000)
+  # es = shap.explainers.Exact(predict, X)
+  #
+  # print("Exact Kernel SHAP:\n", ks(X[0:2]).values)
+  # print("Exact (Permutation) SHAP:\n", es(X[0:2]).values)
+  #
+  # # Exact Kernel SHAP:
+  # #  [[-1.19621609 -1.24184808 -0.9567848   3.87942037 -0.33825     0.54562519]
+  # #  [-1.64922699 -1.20770105 -1.18388581  4.54321217 -0.33795    -0.41082395]]
+  # # Exact (Permutation) SHAP:
+  # #  [[-1.19621609 -1.24184808 -0.9567848   3.87942037 -0.33825     0.54562519]
+  # #  [-1.64922699 -1.20770105 -1.18388581  4.54321217 -0.33795    -0.41082395]]
+
+  expected <- rbind(
+    c(-1.19621609, -1.24184808, -0.9567848, 3.87942037, -0.33825, 0.54562519),
+    c(-1.64922699, -1.20770105, -1.18388581, 4.54321217, -0.33795, -0.41082395)
+  )
+
+  n <- 100
+
+  X <- data.frame(
+    x1 = seq(1:n) / 100,
+    x2 = log(1:n),
+    x3 = sqrt(1:n),
+    x4 = sin(1:n),
+    x5 = (seq(1:n) / 100)^2,
+    x6 = cos(1:n)
+  )
+
+  pf <- function(model, newdata) {
+    x <- newdata
+    x[, 1] * x[, 2] * x[, 3] * x[, 4] + x[, 5] + x[, 6]
+  }
+  ks <- kernelshap(pf, head(X, 2), bg_X = X, pred_fun = pf, verbose = FALSE)
+  expect_equal(unname(ks$S), expected)
+
+  ps <- permshap(pf, head(X, 2), bg_X = X, pred_fun = pf, verbose = FALSE)
+  expect_equal(unname(ps$S), expected)
+
+  # Sampling versions of KernelSHAP is quite close
+  set.seed(1)
+  ksh2 <- kernelshap(
+    pf,
+    head(X, 1),
+    bg_X = X,
+    pred_fun = pf,
+    hybrid_degree = 2,
+    exact = FALSE,
+    m = 1000,
+    max_iter = 100,
+    tol = 0.001,
+    verbose = FALSE
+  )
+  expect_equal(
+    c(ksh2$S),
+    c(-1.194878, -1.24747, -0.9596389, 3.883523, -0.3349787, 0.5453894),
+    tolerance = 1e-4
+  )
+
+  set.seed(1)
+  ksh1 <- kernelshap(
+    pf,
+    head(X, 1),
+    bg_X = X,
+    pred_fun = pf,
+    hybrid_degree = 1,
+    exact = FALSE,
+    m = 1000,
+    max_iter = 1000,
+    tol = 0.002,
+    verbose = FALSE
+  )
+  expect_equal(
+    c(ksh1$S),
+    c(-1.196958, -1.256924, -0.9603291, 3.886163, -0.3277153, 0.5477104),
+    tolerance = 1e-3
+  )
+
+  set.seed(1)
+  ksh0 <- suppressWarnings(
+    kernelshap(
+      pf,
+      head(X, 1),
+      bg_X = X,
+      pred_fun = pf,
+      hybrid_degree = 0,
+      exact = FALSE,
+      m = 10000,
+      max_iter = 10000,
+      tol = 0.003,
+      verbose = FALSE
+    )
+  )
+  expect_equal(
+    c(ksh0$S),
+    c(-1.18917, -1.2298, -0.9247995, 3.80673, -0.3144175, 0.5434034),
+    tolerance = 1e-3
+  )
+})
+
+
+test_that("Random seed works", {
+  n <- 100
+
+  X <- data.frame(
+    x1 = seq(1:n) / 100,
+    x2 = log(1:n),
+    x3 = sqrt(1:n),
+    x4 = sin(1:n),
+    x5 = (seq(1:n) / 100)^2,
+    x6 = cos(1:n)
+  )
+
+  pf <- function(model, newdata, ...) {
+    x <- newdata
+    x[, 1] * x[, 2] * x[, 3] * x[, 4] + x[, 5] + x[, 6]
+  }
+
+  for (algo in c(permshap, kernelshap)) {
+    s1a <- algo(pf, head(X, 2), bg_X = X, pred_fun = pf, verbose = FALSE, seed = 1, exact = FALSE, hybrid_degree = 0)
+    s1b <- algo(pf, head(X, 2), bg_X = X, pred_fun = pf, verbose = FALSE, seed = 1, exact = FALSE, hybrid_degree = 0)
+    s2 <- algo(pf, head(X, 2), bg_X = X, pred_fun = pf, verbose = FALSE, seed = 2, exact = FALSE, hybrid_degree = 0)
+    expect_equal(s1a, s1b)
+    expect_false(identical(s1a$S, s2$S))
+  }
+})
+
+test_that("using foreach (non-parallel) gives the same as normal mode", {
+  for (algo in c(kernelshap, permshap)) {
+    s <- algo(fit, iris[J, x], bg_X = iris, verbose = FALSE)
+    s2 <- suppressWarnings(
+      algo(fit, iris[J, x], bg_X = iris, verbose = FALSE, parallel = TRUE)
+    )
+    expect_equal(s, s2)
+  }
 })

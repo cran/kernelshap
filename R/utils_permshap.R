@@ -28,12 +28,16 @@ permshap_one <- function(
     max_iter,
     ...) {
   bg <- precalc$bg_X_rep
-  X <- rep_rows(x, rep.int(1L, times = nrow(bg)))
+
+  p <- length(feature_names)
+  K <- ncol(v1)
+  K_names <- colnames(v1)
+  beta_n <- matrix(0, nrow = p, ncol = K, dimnames = list(feature_names, K_names))
 
   if (exact) {
     Z <- precalc$Z # ((m_ex+2) x K)
     vz <- get_vz( # (m_ex x K)
-      X = X,
+      x = x,
       bg = bg,
       Z = Z[2L:(nrow(Z) - 1L), , drop = FALSE], # (m_ex x p)
       object = object,
@@ -42,16 +46,18 @@ permshap_one <- function(
       ...
     )
     vz <- rbind(v0, vz, v1) # we add the cheaply calculated v0 and v1
-    rownames(vz) <- precalc$Z_code
-    beta <- shapley_formula(Z, vz = vz)
-    return(list(beta = beta))
+
+    for (j in seq_len(p)) {
+      pos <- precalc$positions[[j]]
+      beta_n[j, ] <- wcolMeans(
+        vz[pos$on, , drop = FALSE] - vz[pos$off, , drop = FALSE],
+        w = precalc$shapley_w[pos$on]
+      )
+    }
+    return(list(beta = beta_n))
   }
 
   # Sampling version
-  p <- length(feature_names)
-  K <- ncol(v1)
-  K_names <- colnames(v1)
-  beta_n <- matrix(0, nrow = p, ncol = K, dimnames = list(feature_names, K_names))
   est_m <- array(
     data = 0, dim = c(max_iter, p, K), dimnames = list(NULL, feature_names, K_names)
   )
@@ -61,7 +67,7 @@ permshap_one <- function(
 
   # Pre-calculate part of Z with rowsum 1 or p - 1
   vz_balanced <- get_vz( # (2p x K)
-    X = rep_rows(x, rep.int(1L, times = nrow(precalc$bg_X_balanced))),
+    x = x,
     bg = precalc$bg_X_balanced,
     Z = precalc$Z_balanced,
     object = object,
@@ -83,17 +89,24 @@ permshap_one <- function(
     if (!low_memory) { # predictions for all chains at once
       Z <- do.call(rbind, Z)
       vz <- get_vz(
-        X = X, bg = bg, Z = Z, object = object, pred_fun = pred_fun, w = bg_w, ...
+        x = x, bg = bg, Z = Z, object = object, pred_fun = pred_fun, w = bg_w, ...
       )
     } else { # predictions for each chain separately
       vz <- vector("list", length = p)
       for (j in seq_len(p)) {
         vz[[j]] <- get_vz(
-          X = X, bg = bg, Z = Z[[j]], object = object, pred_fun = pred_fun, w = bg_w, ...
+          x = x,
+          bg = bg,
+          Z = Z[[j]],
+          object = object,
+          pred_fun = pred_fun,
+          w = bg_w,
+          ...
         )
       }
       vz <- do.call(rbind, vz)
     }
+
     for (j in seq_len(p)) {
       n_iter <- n_iter + 1L
       chain <- chains[[j]]
@@ -121,7 +134,8 @@ permshap_one <- function(
 #' Shapley Weights
 #'
 #' Weights used in Shapley's formula. Vectorized over `p` and/or `ell`.
-#' Required for exact permutation SHAP only.
+#' Required for exact permutation SHAP only. Note that the result is `Inf` when
+#' ell < 0.
 #'
 #' @noRd
 #' @keywords internal
@@ -131,47 +145,6 @@ permshap_one <- function(
 #' @returns Shapley weights.
 shapley_weights <- function(p, ell) {
   1 / choose(p, ell) / (p - ell)
-}
-
-#' Shapley's formula
-#'
-#' Evaluates Shapley's formula for each feature.
-#' Required for exact permutation SHAP only.
-#'
-#' @noRd
-#' @keywords internal
-#'
-#' @param Z Matrix of on-off row vectors.
-#' @param vz Named vector of vz values.
-#' @returns SHAP values organized as (p x K) matrix.
-shapley_formula <- function(Z, vz) {
-  p <- ncol(Z)
-  out <- matrix(nrow = p, ncol = ncol(vz), dimnames = list(colnames(Z), colnames(vz)))
-  for (j in seq_len(p)) {
-    s1 <- Z[, j] == 1L
-    vz1 <- vz[s1, , drop = FALSE]
-    L <- rowSums(Z[s1, -j, drop = FALSE]) # how many players are playing with j?
-    s0 <- rownames(vz1)
-    substr(s0, j, j) <- "0"
-    vz0 <- vz[s0, , drop = FALSE]
-    w <- shapley_weights(p, L)
-    out[j, ] <- wcolMeans(vz1 - vz0, w = w)
-  }
-  out
-}
-
-#' Rowwise Paste
-#'
-#' Fast version of `apply(Z, 1L, FUN = paste0, collapse = "")`.
-#' Required for exact permutation SHAP only.
-#'
-#' @noRd
-#' @keywords internal
-#'
-#' @param Z A (n x p) matrix.
-#' @returns A length n vector.
-rowpaste <- function(Z) {
-  do.call(paste0, asplit(Z, 2L))
 }
 
 #' Balanced Chains
@@ -256,4 +229,28 @@ init_vzj <- function(p, v0, v1) {
   vzj[2L * p + 1L, ] <- vzj[1L, ] <- v1
   vzj[p + 1L, ] <- v0
   return(vzj)
+}
+
+
+#' On-Off Positions
+#'
+#' Creates a list with on- and off-positions of vz for each feature. This can
+#' be calculated once for all rows to be explained.
+#'
+#' @noRd
+#' @keywords internal
+#'
+#' @param mask Logical matrix. The output of `exact_Z(p, feature_names)`.
+#' @returns List with p elements, each containing an `on` and `off` vector.
+positions_for_exact <- function(mask) {
+  p <- ncol(mask)
+  codes <- seq_len(nrow(mask)) # Row index = binary code of the row
+
+  positions <- vector("list", p)
+  for (j in seq_len(p)) {
+    on <- codes[mask[, j]]
+    off <- on - 2^(p - j) # trick to turn "bit" off
+    positions[[j]] <- list(on = on, off = off)
+  }
+  return(positions)
 }

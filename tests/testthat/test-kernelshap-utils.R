@@ -1,11 +1,12 @@
 test_that("sum of kernel weights is 1", {
   for (p in 2:10) {
     expect_equal(sum(kernel_weights(p)), 1.0)
+    expect_equal(sum(kernel_weights_per_coalition_size(p)), 1.0)
   }
 })
 
 test_that("Sum of kernel weights is 1, even for subset of domain", {
-  expect_equal(sum(kernel_weights(10L, S = 2:5)), 1.0)
+  expect_equal(sum(kernel_weights_per_coalition_size(10L, S = 2:5)), 1.0)
 })
 
 p <- 10L
@@ -105,6 +106,17 @@ test_that("hybrid weights sum to 1 for different p and degree 2", {
   }
 })
 
+test_that("sampling input A is comparable from exact input", {
+  set.seed(1)
+
+  for (p in 2:6) {
+    feature_names <- LETTERS[1:p]
+    pa <- input_exact(p, feature_names)
+    sa <- input_sampling(p, m = 100000L, deg = 0, feature_names = feature_names)
+    expect_true(all(abs(pa$A - sa$A) < 0.01))
+  }
+})
+
 test_that("partly_exact_Z(p, k) fails for bad p or k", {
   expect_error(partly_exact_Z(0L, k = 1L, feature_names = LETTERS[1:p]))
   expect_error(partly_exact_Z(5L, k = 3L, feature_names = LETTERS[1:p]))
@@ -114,4 +126,24 @@ test_that("partly_exact_Z(p, k) fails for bad p or k", {
 test_that("input_partly_exact(p, deg) fails for bad p or deg", {
   expect_error(input_partly_exact(2L, deg = 0L, feature_names = LETTERS[1:p]))
   expect_error(input_partly_exact(5L, deg = 3L, feature_names = LETTERS[1:p]))
+})
+
+test_that("new solver gives same results as original one", {
+  solver_old <- function(A, b, constraint) {
+    p <- ncol(A)
+    Ainv <- solve(A) # was actually: Ainv <- MASS::ginv(A)
+    dimnames(Ainv) <- dimnames(A)
+    s <- (matrix(colSums(Ainv %*% b), nrow = 1L) - constraint) / sum(Ainv) #  (1 x K)
+    Ainv %*% (b - s[rep.int(1L, p), , drop = FALSE]) #  (p x K)
+  }
+
+  A <- matrix(seq(0.1, 0.20, length.out = 25), ncol = 5)
+  diag(A) <- 0.5
+  b <- cbind(1:5)
+  constraint <- rbind(8)
+  expect_equal(solver_old(A, b, constraint), solver(A, b, constraint))
+
+  b <- cbind(1:5, seq(2, 10, by = 2))
+  constraint <- rbind(1:2)
+  expect_equal(solver_old(A, b, constraint), solver(A, b, constraint))
 })

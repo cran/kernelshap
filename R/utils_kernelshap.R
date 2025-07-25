@@ -1,8 +1,21 @@
 # Kernel SHAP algorithm for a single row x
 # If exact, a single call to predict() is necessary.
 # If sampling is involved, we need at least two additional calls to predict().
-kernelshap_one <- function(x, v1, object, pred_fun, feature_names, bg_w, exact, deg,
-                           m, tol, max_iter, v0, precalc, ...) {
+kernelshap_one <- function(
+    x,
+    v1,
+    object,
+    pred_fun,
+    feature_names,
+    bg_w,
+    exact,
+    deg,
+    m,
+    tol,
+    max_iter,
+    v0,
+    precalc,
+    ...) {
   p <- length(feature_names)
   K <- ncol(v1)
   K_names <- colnames(v1)
@@ -16,14 +29,8 @@ kernelshap_one <- function(x, v1, object, pred_fun, feature_names, bg_w, exact, 
     v0_m_exact <- v0[rep.int(1L, m_exact), , drop = FALSE] #  (m_ex x K)
 
     # Most expensive part
-    vz <- get_vz( #  (m_ex x K)
-      X = rep_rows(x, rep.int(1L, nrow(bg_X_exact))), #  (m_ex*n_bg x p)
-      bg = bg_X_exact, #  (m_ex*n_bg x p)
-      Z = Z, #  (m_ex x p)
-      object = object,
-      pred_fun = pred_fun,
-      w = bg_w,
-      ...
+    vz <- get_vz(
+      x = x, bg = bg_X_exact, Z = Z, object = object, pred_fun = pred_fun, w = bg_w, ...
     )
     # Note: w is correctly replicated along columns of (vz - v0_m_exact)
     b_exact <- crossprod(Z, precalc[["w"]] * (vz - v0_m_exact)) #  (p x K)
@@ -37,7 +44,6 @@ kernelshap_one <- function(x, v1, object, pred_fun, feature_names, bg_w, exact, 
 
   # Iterative sampling part, always using A_exact and b_exact to fill up the weights
   bg_X_m <- precalc[["bg_X_m"]] #  (m*n_bg x p)
-  X <- rep_rows(x, rep.int(1L, nrow(bg_X_m))) #  (m*n_bg x p)
   v0_m <- v0[rep.int(1L, m), , drop = FALSE] #  (m x K)
   est_m <- array(
     data = 0, dim = c(max_iter, p, K), dimnames = list(NULL, feature_names, K_names)
@@ -60,7 +66,7 @@ kernelshap_one <- function(x, v1, object, pred_fun, feature_names, bg_w, exact, 
 
     # Expensive                                                              #  (m x K)
     vz <- get_vz(
-      X = X, bg = bg_X_m, Z = Z, object = object, pred_fun = pred_fun, w = bg_w, ...
+      x = x, bg = bg_X_m, Z = Z, object = object, pred_fun = pred_fun, w = bg_w, ...
     )
 
     # The sum of weights of A_exact and input[["A"]] is 1, same for b
@@ -89,20 +95,20 @@ kernelshap_one <- function(x, v1, object, pred_fun, feature_names, bg_w, exact, 
 
 # Regression coefficients given sum(beta) = constraint
 # A: (p x p), b: (p x k), constraint: (1 x K)
+# Full credits: https://github.com/iancovert/shapley-regression/blob/master/shapreg/shapley.py
 solver <- function(A, b, constraint) {
-  p <- ncol(A)
-  Ainv <- MASS::ginv(A)
-  dimnames(Ainv) <- dimnames(A)
-  s <- (matrix(colSums(Ainv %*% b), nrow = 1L) - constraint) / sum(Ainv) #  (1 x K)
-  Ainv %*% (b - s[rep.int(1L, p), , drop = FALSE]) #  (p x K)
+  Ainv1 <- solve(A, matrix(1, nrow = nrow(A)))
+  Ainvb <- solve(A, b)
+  num <- rbind(colSums(Ainvb)) - constraint
+  return(Ainvb - Ainv1 %*% num / sum(Ainv1))
 }
+
 
 # Draw m binary vectors z of length p with sum(z) distributed according
 # to Kernel SHAP weights -> (m x p) matrix.
 # The argument S can be used to restrict the range of sum(z).
 sample_Z <- function(p, m, feature_names, S = 1:(p - 1L)) {
-  # First draw s = sum(z) according to Kernel weights (renormalized to sum 1)
-  probs <- kernel_weights(p, S = S)
+  probs <- kernel_weights_per_coalition_size(p, S = S)
   N <- S[sample.int(length(S), m, replace = TRUE, prob = probs)]
 
   # Then, conditional on that number, set random positions of z to 1
@@ -115,7 +121,7 @@ sample_Z <- function(p, m, feature_names, S = 1:(p - 1L)) {
   # t(out)
 
   # Vectorized by Mathias Ambuehl
-  out <- rep(rep.int(0:1, m), as.vector(rbind(p - N, N)))
+  out <- rep(rep.int(c(FALSE, TRUE), m), as.vector(rbind(p - N, N)))
   dim(out) <- c(p, m)
   ord <- order(col(out), sample.int(m * p))
   out[] <- out[ord]
@@ -137,9 +143,9 @@ input_sampling <- function(p, m, deg, feature_names) {
   }
   S <- (deg + 1L):(p - deg - 1L)
   Z <- sample_Z(p = p, m = m / 2, feature_names = feature_names, S = S)
-  Z <- rbind(Z, 1 - Z)
-  w_total <- if (deg == 0L) 1 else 1 - 2 * sum(kernel_weights(p)[seq_len(deg)])
-  w <- w_total / m
+  Z <- rbind(Z, !Z)
+  w <- if (deg == 0L) 1 else 1 - prop_exact(p, deg = deg)
+  w <- w / m
   list(Z = Z, w = rep.int(w, m), A = crossprod(Z) * w)
 }
 
@@ -151,34 +157,12 @@ input_sampling <- function(p, m, deg, feature_names) {
 #      the SHAP kernel distribution
 # - A: Exact matrix A = Z'wZ
 input_exact <- function(p, feature_names) {
-  Z <- exact_Z(p, feature_names = feature_names, keep_extremes = FALSE)
-  # Each Kernel weight(j) is divided by the number of vectors z having sum(z) = j
-  w <- kernel_weights(p) / choose(p, 1:(p - 1L))
-  list(Z = Z, w = w[rowSums(Z)], A = exact_A(p, feature_names = feature_names))
-}
-
-#' Exact Matrix A
-#'
-#' Internal function that calculates exact A.
-#' Notice the difference to the off-diagnonals in the Supplement of
-#' Covert and Lee (2021). Credits to David Watson for figuring out the correct formula,
-#' see our discussions in https://github.com/ModelOriented/kernelshap/issues/22
-#'
-#' @noRd
-#' @keywords internal
-#'
-#' @param p Number of features.
-#' @param feature_names Feature names.
-#' @returns A (p x p) matrix.
-exact_A <- function(p, feature_names) {
-  S <- 1:(p - 1L)
-  c_pr <- S * (S - 1) / p / (p - 1)
-  off_diag <- sum(kernel_weights(p) * c_pr)
-  A <- matrix(
-    data = off_diag, nrow = p, ncol = p, dimnames = list(feature_names, feature_names)
-  )
-  diag(A) <- 0.5
-  A
+  Z <- exact_Z(p, feature_names = feature_names)
+  Z <- Z[2L:(nrow(Z) - 1L), , drop = FALSE]
+  kw <- kernel_weights(p) # Kernel weights for all subsets
+  w <- kw[rowSums(Z)] # Corresponding weight for each row in Z
+  w <- w / sum(w)
+  list(Z = Z, w = w, A = crossprod(Z, w * Z))
 }
 
 # List all length p vectors z with sum(z) in {k, p - k}
@@ -191,17 +175,18 @@ partly_exact_Z <- function(p, k, feature_names) {
   }
   if (k == 1L) {
     Z <- diag(p)
+    storage.mode(Z) <- "logical"
   } else {
     Z <- t(
       utils::combn(seq_len(p), k, FUN = function(z) {
-        x <- numeric(p)
-        x[z] <- 1
+        x <- logical(p)
+        x[z] <- TRUE
         x
       })
     )
   }
   if (p != 2L * k) {
-    Z <- rbind(Z, 1 - Z)
+    Z <- rbind(Z, !Z)
   }
   colnames(Z) <- feature_names
   Z
@@ -220,22 +205,39 @@ input_partly_exact <- function(p, deg, feature_names) {
   }
 
   kw <- kernel_weights(p)
-  Z <- w <- vector("list", deg)
 
+  Z <- vector("list", deg)
   for (k in seq_len(deg)) {
     Z[[k]] <- partly_exact_Z(p, k = k, feature_names = feature_names)
-    n <- nrow(Z[[k]])
-    w_tot <- kw[k] * (2 - (p == 2L * k))
-    w[[k]] <- rep.int(w_tot / n, n)
   }
-  w <- unlist(w, recursive = FALSE, use.names = FALSE)
   Z <- do.call(rbind, Z)
-
+  w <- kw[rowSums(Z)]
+  w_target <- prop_exact(p, deg = deg) # How much of total weight to spend here
+  w <- w / sum(w) * w_target
   list(Z = Z, w = w, A = crossprod(Z, w * Z))
 }
 
-# Kernel weights normalized to a non-empty subset S of {1, ..., p-1}
-kernel_weights <- function(p, S = seq_len(p - 1L)) {
-  probs <- (p - 1L) / (choose(p, S) * S * (p - S))
-  probs / sum(probs)
+# Kernel weight distribution. Gives the weight of each coalition vector of sum k
+kernel_weights <- function(p) {
+  S <- seq_len(p - 1L)
+  probs <- 1 / (choose(p, S) * S * (p - S))
+  return(probs / sum(probs))
+}
+
+# Kernel weights per coalition size. Sums the kernel_weights over the number of
+# coalitions with same sum.
+kernel_weights_per_coalition_size <- function(p, S = seq_len(p - 1L)) {
+  probs <- 1 / (S * (p - S))
+  return(probs / sum(probs))
+}
+
+# How much Kernel SHAP weights do coalitions of size
+# {1, ..., deg, ..., p-deg-1 ..., p-1} have?
+prop_exact <- function(p, deg) {
+  if (deg == 0) {
+    return(0)
+  }
+  w <- kernel_weights_per_coalition_size(p)
+  w_total <- 2 * sum(w[seq_len(deg)]) - w[deg] * (p == 2 * deg)
+  return(w_total)
 }
