@@ -124,16 +124,16 @@ permshap.default <- function(
     message(txt)
   }
 
+  if (!is.null(seed)) {
+    set.seed(seed)
+  }
+
   basic_checks(X = X, feature_names = feature_names, pred_fun = pred_fun)
   prep_bg <- prepare_bg(X = X, bg_X = bg_X, bg_n = bg_n, bg_w = bg_w, verbose = verbose)
   bg_X <- prep_bg$bg_X
   bg_w <- prep_bg$bg_w
   bg_n <- nrow(bg_X)
   n <- nrow(X)
-
-  if (!is.null(seed)) {
-    set.seed(seed)
-  }
 
   # Baseline and predictions on explanation data
   bg_preds <- align_pred(pred_fun(object, bg_X, ...))
@@ -143,23 +143,27 @@ permshap.default <- function(
   # Pre-calculations that are identical for each row to be explained
   if (exact) {
     Z <- exact_Z(p, feature_names = feature_names)
-    m_exact <- nrow(Z) - 2L # We won't evaluate vz for first and last row
+    Z_no_extremes <- Z[2L:(nrow(Z) - 1L), , drop = FALSE]
+    m_exact <- nrow(Z_no_extremes) # 2^p - 2
     m_eval <- 0L # for consistency with sampling case
+    g <- rep_each(m_exact, each = bg_n)
     precalc <- list(
-      Z = Z,
-      bg_X_rep = rep_rows(bg_X, rep.int(seq_len(bg_n), m_exact)),
+      Z_exact_rep = Z_no_extremes[g, , drop = FALSE],
+      bg_exact_rep = rep_rows(bg_X, rep.int(seq_len(bg_n), m_exact)),
       positions = positions_for_exact(Z),
       shapley_w = shapley_weights(p, ell = rowSums(Z) - 1) # how many other players?
     )
   } else {
     max_iter <- as.integer(ceiling(max_iter / p) * p) # should be multiple of p
-    m_exact <- 2L * p
-    m <- 2L * (p - 3L) # inner loop
+    Z <- exact_Z_balanced(p, feature_names)
+    m_exact <- nrow(Z) # 2L * p
+    m <- 2L * (p - 3L) # for inner loop
     m_eval <- if (low_memory) m else m * p # outer loop
+    g <- rep_each(m_exact, each = bg_n)
     precalc <- list(
-      bg_X_rep = rep_rows(bg_X, rep.int(seq_len(bg_n), m_eval)),
-      bg_X_balanced = rep_rows(bg_X, rep.int(seq_len(bg_n), m_exact)),
-      Z_balanced = exact_Z_balanced(p, feature_names)
+      Z_balanced_rep = Z[g, , drop = FALSE],
+      bg_balanced_rep = rep_rows(bg_X, rep.int(seq_len(bg_n), m_exact)),
+      bg_sampling_rep = rep_rows(bg_X, rep.int(seq_len(bg_n), m_eval))
     )
   }
 
@@ -184,6 +188,7 @@ permshap.default <- function(
       low_memory = low_memory,
       tol = tol,
       max_iter = max_iter,
+      bg_n = bg_n,
       ...
     )
   } else {
@@ -205,6 +210,7 @@ permshap.default <- function(
         low_memory = low_memory,
         tol = tol,
         max_iter = max_iter,
+        bg_n = bg_n,
         ...
       )
       if (verbose && n >= 2L) {

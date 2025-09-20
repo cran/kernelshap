@@ -1,6 +1,6 @@
 Package: kernelshap
 Title: Kernel SHAP
-Version: 0.9.0
+Version: 0.9.1
 Authors@R: c(
     person("Michael", "Mayer", , "mayermichael79@gmail.com", role = c("aut", "cre"),
            comment = c(ORCID = "0009-0007-2540-9629")),
@@ -29,7 +29,7 @@ Config/testthat/edition: 3
 URL: https://github.com/ModelOriented/kernelshap
 BugReports: https://github.com/ModelOriented/kernelshap/issues
 NeedsCompilation: no
-Packaged: 2025-07-25 12:29:33 UTC; mayer
+Packaged: 2025-09-20 13:58:39 UTC; mayer
 Author: Michael Mayer [aut, cre] (ORCID:
     <https://orcid.org/0009-0007-2540-9629>),
   David Watson [aut] (ORCID: <https://orcid.org/0000-0001-9632-2159>),
@@ -37,4 +37,4 @@ Author: Michael Mayer [aut, cre] (ORCID:
     <https://orcid.org/0000-0001-8423-1823>)
 Maintainer: Michael Mayer <mayermichael79@gmail.com>
 Repository: CRAN
-Date/Publication: 2025-07-25 12:50:02 UTC
+Date/Publication: 2025-09-20 14:20:02 UTC
